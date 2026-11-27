@@ -71,6 +71,44 @@ class TestSecretScan(unittest.TestCase):
             f.write(FAKE["aws_access_key"] + "\n")
         self.assertEqual(secret_scan.main([d]), 1)
 
+    def _write(self, d, rel, data):
+        p = os.path.join(d, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(data)
+
+    def test_large_file_fails_closed(self):
+        d = tmpdir(self)
+        self._write(d, "big.txt", b"a" * (secret_scan.MAX_FILE + 1))
+        out = {"fail": [], "flag": []}
+        secret_scan.scan_tree(d, out)
+        self.assertTrue(any("skipped_large_file" in x for x in out["fail"]))
+        self.assertEqual(secret_scan.main([d]), 1)
+
+    def test_nul_byte_text_file_is_still_scanned(self):
+        d = tmpdir(self)
+        self._write(d, "nul.txt", b"\0" + b"x" * 10 + b"\n" + FAKE["aws_access_key"].encode() + b"\n")
+        self.assertEqual(secret_scan.main([d]), 1)
+
+    def test_known_binary_extension_is_skipped(self):
+        d = tmpdir(self)
+        self._write(d, "img.png", b"\0" + FAKE["aws_access_key"].encode())
+        self.assertEqual(secret_scan.main([d]), 0)
+
+    def test_work_dir_skipped_only_at_top_level(self):
+        secret = (FAKE["aws_access_key"] + "\n").encode()
+        d = tmpdir(self)
+        self._write(d, "work/x.txt", secret)
+        self.assertEqual(secret_scan.main([d]), 0)
+        self._write(d, "tests/work/x.txt", secret)
+        self.assertEqual(secret_scan.main([d]), 1)
+
+    def test_other_skip_dirs_still_skipped_at_depth(self):
+        d = tmpdir(self)
+        for name in (".git", "__pycache__", "node_modules"):
+            self._write(d, "sub/%s/x.txt" % name, (FAKE["aws_access_key"] + "\n").encode())
+        self.assertEqual(secret_scan.main([d]), 0)
+
     def test_whole_repo_is_clean(self):
         self.assertEqual(secret_scan.main([REPO]), 0)
 

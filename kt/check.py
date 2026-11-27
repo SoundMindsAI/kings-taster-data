@@ -340,12 +340,13 @@ def _status_of(src):
         return "not_configured"
     if code in (403, 429) or src.get("status") == "rate_limited":
         return "rate_limited"
-    extracted = src.get("extracted") or {}
-    if extracted.get("class") == "injection_seen" or src.get("status") == "injection_seen":
+    extracted = src.get("extracted")
+    if (isinstance(extracted, dict) and extracted.get("class") == "injection_seen") or src.get("status") == "injection_seen":
         return "failed"
     if src.get("status") == "failed" or (code and not (200 <= int(code) < 300)):
         return "failed"
-    if src.get("canary_ok") is False:
+    # Missing evidence is failed evidence: canary_ok must be exactly True and extracted a dict.
+    if src.get("canary_ok") is not True or not isinstance(extracted, dict):
         return "failed"
     return src.get("status") or "ok"
 
@@ -401,7 +402,9 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
                 "source_date": src.get("source_date") or now,
             }
         checked.append(entry)
-        extracted = src.get("extracted") or {}
+        extracted = src.get("extracted")
+        if not isinstance(extracted, dict):
+            extracted = {}
         date = _date10(src.get("source_date") or extracted.get("date") or now)
 
         if status == "not_configured":

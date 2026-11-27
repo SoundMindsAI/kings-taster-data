@@ -18,7 +18,14 @@ import re
 import subprocess
 import sys
 
-SKIP_DIRS = {".git", "__pycache__", "work", "node_modules"}
+SKIP_DIRS = {".git", "__pycache__", "node_modules"}  # skipped at any depth
+SKIP_TOP_DIRS = {"work"}  # skipped only directly under the scan root
+BINARY_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tif", ".tiff", ".pdf",
+    ".zip", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".tar", ".jar", ".whl",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot", ".wasm",
+    ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe", ".o", ".a", ".class",
+}
 MAX_FILE = 5 * 1024 * 1024
 
 FAIL_RULES = [
@@ -87,7 +94,8 @@ def scan_line(line):
 
 def iter_files(root):
     for d, dirs, files in os.walk(root):
-        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
+        at_root = os.path.abspath(d) == os.path.abspath(root)
+        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not (at_root and x in SKIP_TOP_DIRS))
         for f in sorted(files):
             yield os.path.join(d, f)
 
@@ -106,15 +114,15 @@ def scan_text(label, text, out):
 def scan_tree(root, out):
     count = 0
     for p in iter_files(root):
+        if os.path.splitext(p)[1].lower() in BINARY_EXTS:
+            continue
         try:
             if os.path.getsize(p) > MAX_FILE:
-                out["flag"].append("%s: skipped_large_file" % os.path.relpath(p, root))
+                out["fail"].append("%s: skipped_large_file (over %d bytes, not scanned)" % (os.path.relpath(p, root), MAX_FILE))
                 continue
             with open(p, "rb") as f:
                 data = f.read()
         except OSError:
-            continue
-        if b"\0" in data[:4096]:
             continue
         count += 1
         scan_text(os.path.relpath(p, root), data.decode("utf-8", "replace"), out)
