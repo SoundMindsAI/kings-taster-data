@@ -11,9 +11,6 @@ is not fetched, parsed or republished until its row is cleared.
 | GitHub Advisory Database content inside `MAL-` records whose origin is `ghsa-malware` | **included (as part of the row above)** | CC-BY 4.0 | yes | yes, with attribution | adds "; GitHub Advisory Database (CC-BY 4.0)" and license `Apache-2.0 AND CC-BY-4.0` on those entries | none | n/a | [github/advisory-database](https://github.com/github/advisory-database) README (CC-BY 4.0) | same fields as above; GHSA IDs kept only as aliases |
 | Google Safe Browsing canonicalization test vectors (in `conformance.json`) | **included (test data only)** | CC-BY 4.0 (Google Developers docs) | yes | yes, with attribution | "Google Safe Browsing API documentation" | none | n/a | [URLs and hashing](https://developers.google.com/safe-browsing/v4/urls-hashing), [site policies](https://developers.google.com/site-policies) | the 33 published input/expected pairs, verbatim |
 | OSV.dev non-MAL records (GHSA, PYSEC, etc.) | pending | varies per upstream (CC-BY 4.0, CC-BY-SA 4.0, CC-BY-NC-ND …) | varies | varies | n/a | none | n/a | [OSV data sources](https://google.github.io/osv.dev/data/) | not in the list file; bots query OSV live |
-| abuse.ch Feodo Tracker | **pending** (license review not finished) | CC0 per abuse.ch | — | — | — | — | — | [abuse.ch terms](https://abuse.ch/terms-of-use/) | nothing |
-| abuse.ch SSL Blacklist | **pending** (same) | CC0 per abuse.ch | — | — | — | — | — | same | nothing |
-| abuse.ch URLhaus, ThreatFox | **pending** (not in v1) | — | — | — | — | per-user key | — | same | nothing |
 | Google Safe Browsing | **never in the list file** | Google APIs terms | — | **no** | — | — | — | [Safe Browsing terms](https://developers.google.com/safe-browsing/terms) | nothing |
 | SafeDep | **pending** (license not cleared) | — | — | — | — | — | — | — | nothing |
 | StepSecurity | **pending** (license not cleared) | — | — | — | — | — | — | — | nothing |

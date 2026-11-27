@@ -37,5 +37,4 @@ KT_LIST = {
 }
 
 # Sources deliberately NOT included in v1 (each has a 'pending' row in sources/LICENSES.md).
-EXCLUDED = ["abuse.ch Feodo Tracker", "abuse.ch SSL Blacklist", "abuse.ch URLhaus", "abuse.ch ThreatFox",
-            "Google Safe Browsing", "SafeDep", "StepSecurity", "Socket"]
+EXCLUDED = ["Google Safe Browsing", "SafeDep", "StepSecurity", "Socket"]

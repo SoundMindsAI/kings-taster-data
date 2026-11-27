@@ -140,9 +140,16 @@ class TestVerify(unittest.TestCase):
             with self.assertRaises(KV.VerifyError):
                 KV.verify_release(out, bad, now=T0)
 
-    def test_committed_allowed_signers_has_no_keys(self):
-        with self.assertRaisesRegex(KV.VerifyError, "no keys"):
-            KV.check_allowed_signers(os.path.join(REPO, "config", "allowed_signers"))
+    def test_committed_allowed_signers_is_public_only(self):
+        path = os.path.join(REPO, "config", "allowed_signers")
+        KV.check_allowed_signers(path)  # must parse and hold at least one key
+        with open(path) as f:
+            text = f.read()
+        self.assertNotIn("PRIVATE KEY", text)
+        keys = [l for l in text.splitlines() if l and not l.startswith("#")]
+        self.assertTrue(1 <= len(keys) <= 2)
+        for l in keys:
+            self.assertIn('namespaces="kings-taster" ssh-ed25519 ', l)
 
 
 def load_pub(key):
