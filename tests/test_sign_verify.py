@@ -13,7 +13,7 @@ from tests.helpers import REPO, T0, T0_ISO, fetch_all, load, make_root, readb, s
 from kt import build as B
 
 HAVE_SSH = shutil.which("ssh-keygen") is not None
-FILES = ("latest.json", "iocs.json", "conformance.json", "stats.json")
+FILES = ("latest.json", "iocs.json", "conformance.json", "stats.json", "manifest.json")
 
 
 def keygen(d, name, kind="ed25519"):
@@ -176,6 +176,27 @@ class TestVerify(VerifyBase):
         with self.assertRaisesRegex(KV.VerifyError, "too large"):
             self.v(out)
 
+    def test_shards_checked_against_signed_manifest(self):
+        out = self.release("a")
+        self.assertEqual(KV.verify_release(out, self.allowed, now=T0, require_shards=True)[0], 0)
+        os.remove(os.path.join(out, "shard-npm-00.json"))
+        self.assertEqual(self.v(out)[0], 0)  # a client keeps only the shards it needs
+        with self.assertRaisesRegex(KV.VerifyError, "shard npm-00 missing"):
+            KV.verify_release(out, self.allowed, now=T0, require_shards=True)
+        with open(os.path.join(out, "shard-kev.json"), "ab") as f:
+            f.write(b"\n")
+        with self.assertRaisesRegex(KV.VerifyError, "shard kev hash/size mismatch"):
+            self.v(out)
+
+    def test_unsigned_manifest_change_refused(self):
+        out = self.release("a")
+        m = load(os.path.join(out, "manifest.json"))
+        m["counts"]["entries"] += 1
+        with open(os.path.join(out, "manifest.json"), "wb") as f:
+            f.write(canonical_json(m))
+        with self.assertRaisesRegex(KV.VerifyError, "manifest.json: signature did not verify"):
+            self.v(out)
+
     def test_committed_allowed_signers_is_public_only(self):
         path = os.path.join(REPO, "config", "allowed_signers")
         KV.check_allowed_signers(path)  # must parse and hold at least one key
@@ -254,6 +275,7 @@ class TestSignAndRelease(SignAndReleaseBase):
                                   env_extra={"KT_DRY_RUN_OUT": keep})
         self.assertEqual(rc, 0, out)
         self.assertIn("DRY RUN OK", out)
+        self.assertIn("518 shards pinned by manifest.json", out)
         self.assertNotIn(self.key, out)
         self.assertNotIn("PRIVATE KEY", out)
         for f in FILES:
@@ -321,4 +343,8 @@ class TestSignAndRelease(SignAndReleaseBase):
             self.assertIn(f + ".sig", assets)
         self.assertIn("Apache-2.0.txt", assets)
         self.assertNotIn("build-report.json", assets)
+        shards = [a for a in assets if a.startswith("shard-")]
+        self.assertEqual(len(shards), 518)
+        self.assertFalse(any(a.endswith(".sig") for a in shards))  # pinned by the signed manifest instead
+        self.assertLessEqual(len(assets), 1000)
         self.assertFalse(any(self.key in " ".join(c) for c in calls))

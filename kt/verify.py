@@ -2,8 +2,11 @@
 
 python3 -m kt.verify <dir> --allowed-signers config/allowed_signers
        [--state FILE [--update-state]] [--template-version X.Y.Z] [--now ISO] [--max-age-hours 48]
+       [--require-shards]
 
-<dir> holds latest.json, iocs.json, conformance.json, stats.json and a .sig for each.
+<dir> holds latest.json, iocs.json, conformance.json, stats.json, manifest.json and a .sig for each.
+Any shard-*.json files in <dir> are checked against the signed manifest (SHA-256, size, gzip cap, counts);
+with --require-shards every shard the manifest lists must be present.
 Prints one verdict line. Exit codes:
   0 VERIFIED   1 UNVERIFIED (bad/missing signature, wrong key, hash mismatch, bad file, rollback)
   3 PAUSED     4 UPDATE_REQUIRED   5 STALE
@@ -18,7 +21,8 @@ import subprocess
 import sys
 
 from .common import loads_strict, parse_time, sha256_file, utc_now, write_json, read_json
-from .validate import RELEASE_FILES, check_not_future, validate_latest
+from . import shards as SH
+from .validate import MAX_MANIFEST_BYTES, RELEASE_FILES, check_not_future, validate_latest, validate_manifest
 
 NAMESPACE = "kings-taster"
 PRINCIPALS = ("kings-taster-current", "kings-taster-next")
@@ -97,7 +101,7 @@ def verify_file(path, allowed):
 
 
 def verify_release(d, allowed, state=None, update_state=False, template_version=None, now=None,
-                   max_age_hours=48):
+                   max_age_hours=48, require_shards=False):
     check_allowed_signers(allowed)
     signers = {name: verify_file(os.path.join(d, name), allowed) for name in FILES}
     with open(os.path.join(d, "latest.json"), "rb") as f:
@@ -115,6 +119,14 @@ def verify_release(d, allowed, state=None, update_state=False, template_version=
         doc = read_json(os.path.join(d, name))
         if not isinstance(doc, dict) or doc.get("file_type") != ft:
             raise VerifyError("%s has the wrong file_type" % name)
+    if os.path.getsize(os.path.join(d, "manifest.json")) > MAX_MANIFEST_BYTES:
+        raise VerifyError("manifest.json is over the 5 MB cap")
+    manifest = read_json(os.path.join(d, "manifest.json"))
+    if not isinstance(manifest, dict) or manifest.get("file_type") != "manifest" or validate_manifest(manifest):
+        raise VerifyError("manifest.json has the wrong file_type or fails its schema")
+    errs = SH.validate_shards(d, manifest, require_all=require_shards)
+    if errs:
+        raise VerifyError("shard check failed: " + errs[0])
     now = now or utc_now()
     errs = check_not_future(latest["generated_at"], now)
     if errs:
@@ -154,10 +166,11 @@ def main(argv=None):
     ap.add_argument("--template-version")
     ap.add_argument("--now")
     ap.add_argument("--max-age-hours", type=int, default=48)
+    ap.add_argument("--require-shards", action="store_true")
     a = ap.parse_args(argv)
     try:
         code, line = verify_release(a.dir, a.allowed_signers, a.state, a.update_state, a.template_version,
-                                    parse_time(a.now) if a.now else None, a.max_age_hours)
+                                    parse_time(a.now) if a.now else None, a.max_age_hours, a.require_shards)
     except (VerifyError, OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
         print("UNVERIFIED: %s" % str(e)[:300])
         return 1

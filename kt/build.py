@@ -2,8 +2,8 @@
 
 python3 -m kt.build --sources <dir> --out <dir> [--previous <dir> | --bootstrap] [--force-pause]
 
-Writes iocs.json, conformance.json, stats.json, latest.json (canonical JSON) and
-build-report.json (not released: circuit breaker, hold queue, rejects).
+Writes iocs.json, conformance.json, stats.json, manifest.json, one shard-*.json per shard, latest.json
+(canonical JSON) and build-report.json (not released: circuit breaker, hold queue, rejects).
 Exit codes: 0 built; 1 refused (validation, monotonicity, missing source with no previous).
 """
 import argparse
@@ -14,9 +14,11 @@ import statistics
 import sys
 
 from . import sources as S
+from . import shards as SH
 from .common import (CVE_ID, ECO_PREFIX, canonical_json, defang, fmt_time, match_key, normalize_package,
                      parse_time, read_json, sha256_bytes, utc_now, write_json)
-from .validate import check_monotonic, validate_conformance, validate_iocs, validate_latest, validate_stats
+from .validate import (RELEASE_ASSET_OVERHEAD, check_monotonic, validate_conformance, validate_iocs, validate_latest,
+                       validate_manifest, validate_stats)
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SOURCE_FILES = {"cisa-kev": "kev.json", "osv-npm": "osv-npm.json", "osv-pypi": "osv-pypi.json"}
@@ -287,10 +289,29 @@ def build(sources_dir, out_dir, previous_dir=None, bootstrap=False, force_pause=
     if errs:
         raise BuildError("conformance.json failed validation: " + "; ".join(errs[:10]))
 
-    # 7. write + latest
+    # 7. shards + manifest (SPEC.md §6.5)
+    try:
+        manifest, shard_files = SH.build_shards(iocs, limits)
+    except SH.ShardError as e:
+        raise BuildError(str(e))
+    errs = validate_manifest(manifest)
+    max_assets = limits["shards"]["max_release_assets"]
+    if len(shard_files) + RELEASE_ASSET_OVERHEAD > max_assets:
+        errs.append("%d shards would exceed the %d-asset release limit" % (len(shard_files), max_assets))
+    if errs:
+        raise BuildError("manifest.json failed validation: " + "; ".join(errs[:10]))
+
+    # 8. write + latest
     os.makedirs(out_dir, exist_ok=True)
+    for name in os.listdir(out_dir):
+        if name.startswith("shard-") and name.endswith(".json"):
+            os.remove(os.path.join(out_dir, name))  # never leave a stale shard from an older build
+    for name, b in shard_files.items():
+        with open(os.path.join(out_dir, name), "wb") as f:
+            f.write(b)
     assets = {}
-    for name, doc in (("iocs.json", iocs), ("conformance.json", conf), ("stats.json", stats)):
+    for name, doc in (("iocs.json", iocs), ("conformance.json", conf), ("stats.json", stats),
+                      ("manifest.json", manifest)):
         b = canonical_json(doc)
         with open(os.path.join(out_dir, name), "wb") as f:
             f.write(b)
@@ -308,7 +329,9 @@ def build(sources_dir, out_dir, previous_dir=None, bootstrap=False, force_pause=
               "needs_human": bool(breaker), "breaker": breaker,
               "added": len(added), "removed": len(removed), "newly_revoked": len(newly_revoked),
               "hold_queue": hold, "rejected_upstream_records": rejected,
-              "sources": {s["id"]: s["status"] for s in src_records}, "assets": assets}
+              "sources": {s["id"]: s["status"] for s in src_records}, "assets": assets,
+              "shards": {"count": len(shard_files), "max_gzip_bytes": max(r["gzip_bytes"] for r in manifest["shards"]),
+                         "total_gzip_bytes": sum(r["gzip_bytes"] for r in manifest["shards"])}}
     write_json(os.path.join(out_dir, "build-report.json"), report)
     return report
 

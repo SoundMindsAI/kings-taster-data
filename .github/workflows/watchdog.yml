@@ -32,7 +32,7 @@ jobs:
           gh release download kt-latest --repo "$GITHUB_REPOSITORY" --pattern latest.json --pattern latest.json.sig --dir live
           tag="$(python3 -E -s -c 'import json;print(json.load(open("live/latest.json"))["tag"])')"
           [[ "$tag" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "bad tag"; exit 1; }
-          for f in iocs.json conformance.json stats.json; do
+          for f in iocs.json conformance.json stats.json manifest.json; do
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$f" --pattern "$f.sig" --dir live
           done
           python3 -E -s -m kt.verify live --allowed-signers config/allowed_signers --max-age-hours 26

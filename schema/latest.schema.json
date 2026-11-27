@@ -11,9 +11,10 @@
     "tag": {"type": "string", "pattern": "^kt-\\d{8}T\\d{6}Z$"},
     "release_base_url": {"type": "string", "pattern": "^https://github\\.com/SoundMindsAI/kings-taster-data/releases/download/kt-\\d{8}T\\d{6}Z/$"},
     "assets": {"type": "object", "additionalProperties": false,
-      "required": ["iocs.json", "conformance.json", "stats.json"],
+      "required": ["iocs.json", "conformance.json", "stats.json", "manifest.json"],
       "properties": {
         "iocs.json": {"$ref": "#/$defs/asset"},
+        "manifest.json": {"$ref": "#/$defs/asset"},
         "conformance.json": {"$ref": "#/$defs/asset"},
         "stats.json": {"$ref": "#/$defs/asset"}}},
     "paused": {"type": "boolean"},

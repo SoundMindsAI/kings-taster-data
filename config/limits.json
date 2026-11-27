@@ -7,5 +7,6 @@
   "max_download_bytes": {"cisa-kev": 52428800, "osv-npm": 1073741824, "osv-pypi": 268435456},
   "max_zip_member_bytes": 1048576,
   "max_zip_total_uncompressed_bytes": 4294967296,
-  "max_versions_per_entry": 500
+  "max_versions_per_entry": 500,
+  "shards": {"prefix_bytes": {"npm": 1, "pypi": 1}, "max_manifest_bytes": 5242880, "max_shard_gzip_bytes": 5242880, "max_release_assets": 1000}
 }
