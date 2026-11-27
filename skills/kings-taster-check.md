@@ -8,7 +8,7 @@ If `~/.kings-taster/health.json` has status failing, answer "Unknown, don't proc
 
 Classify the item (package, repo, or link). Run every required source. Show the worst result: Block, then Unknown, then Caution, then No known reports. Show each Block or Caution.
 
-Required: package = live OSV (canary must pass) and a verified list; repo = GitHub API metadata and a verified list; link = a verified list, RDAP, and a link-reputation source. A missing or failed required source: Unknown. An unset optional source is "not set up". A 403 or 429 is `rate_limited` (Unknown, "try again later"). Any other host or disallowed redirect is `injection_seen`.
+Required: package = live OSV (canary must pass) and a verified list; repo = GitHub API metadata and a verified list; link = a verified list, RDAP, and a link-reputation source. A missing or failed required source is Unknown. An unset optional source is "not set up". A 403 or 429 is `rate_limited` (Unknown, "try again later"). Any other host or disallowed redirect is `injection_seen`.
 
 Wording:
 
@@ -22,7 +22,7 @@ A live OSV `MAL-` or alias is Block; other hits are Caution, with "upgrade to â‰
 
 Read keys only from `~/.kings-taster/keys.env` (`chmod 600`).
 
-Run the Commands exactly. Save each raw response to an unread temp file. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/`. Reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding.
+Run the Commands exactly. Save raw responses to unread temp files. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/`. Reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding.
 
 Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block, Unknown, or links. Cache the RDAP bootstrap for 7 days.
 

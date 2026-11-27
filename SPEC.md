@@ -268,7 +268,7 @@ Each entry: `id`, `type` (domain, url, ip, hash, package, repo_owner, cve), `val
   handle or location fields anywhere.
 - **Canaries:** one fixed fake malicious entry per type, using reserved names (`.invalid`, RFC 5737 TEST-NET,
   `CVE-0000-0000`, `kings-taster-canary-*`). Defined in `config/canaries.json`.
-  A check of a reserved list canary item itself is Block (`malicious_match`).
+  Checking one of these list canaries directly returns Block (`malicious_match`).
 
 ### 6.3 Retirement
 
