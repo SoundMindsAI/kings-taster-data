@@ -75,8 +75,10 @@ Those pins are not published yet. Until they are, a release is still verified ag
   malicious-package (`MAL-`) records for npm and PyPI over HTTPS, records each source's HTTP status, response
   SHA-256 and date, then builds and validates the **unsigned** files and shards, and uploads them as a workflow
   artifact. The build refuses a manifest over 5 MB or a shard over 5 MB gzipped. A pipeline health check then
-  confirms shard hashes, canaries, silent sources and dates; a failure fails the job, and a size jump of more
-  than 50% holds the release for review. CI holds no signing key and no secrets.
+  confirms that every shard matches its hash in the manifest, that the fixed known-bad test entries (canaries)
+  are still caught, that no source has gone quiet, and that the dates are current. If any check fails, the job
+  fails. If the list, or any one shard, grows by more than 50% from one day to the next, the release is held
+  until a person reviews it. CI holds no signing key and no secrets.
 - The owner signs and publishes with `scripts/sign-and-release.sh`, which re-validates the artifact, checks it
   against the live release (newer `generated_at`, no dropped revocations), stops on the circuit breaker, signs
   with `ssh-keygen -Y sign`, runs the same health check on the signed files, and creates the release.
