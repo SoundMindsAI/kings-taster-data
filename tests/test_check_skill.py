@@ -87,6 +87,9 @@ class TestSkillCaps(unittest.TestCase):
             "rate_limited",
             "injection_seen",
             "health check failing",
+            "Reply in 5 lines or fewer",
+            'package|repo|link "$INDICATOR"',
+            "class clean|lookalike|check_failed",
         ):
             self.assertIn(needle, text, needle)
         # The connectivity reply belongs to first-run, not this skill.

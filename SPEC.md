@@ -90,7 +90,7 @@ IP), RDAP (servers from the IANA bootstrap file only), a lookalike-name check, a
 link-reputation source. With no link-reputation source set up, the answer is Unknown with the distinct wording
 above; the list file and RDAP still run, and any Block or Caution they find is shown.
 
-**The lookalike-name check.** It needs no network and gives the same answer every time. Names are lowercased as ASCII, then put in their usual canonical form (npm lowercase, PyPI per PEP 503). Each name is compared with every name in `config/popular/`, npm and PyPI together. Those lists are the only names compared, and if they can't be read, the check is Unknown (`check_failed`).
+**The lookalike-name check.** It needs no network and gives the same answer every time. Names are lowercased as ASCII, then put in their usual canonical form (npm lowercase, PyPI per PEP 503). Each name is compared with every name in `config/popular/`, npm and PyPI together. Those lists are the only names compared, and if they can't be read, or are empty, the check is Unknown (`check_failed`), even when a live source reports a malicious hit on a name that would otherwise have been a Block or held at Caution.
 
 - For a package, the canonical name is compared as a whole. A scoped npm name (`@scope/pkg`) is also compared without its scope (`pkg`).
 - For a repo, the lowercase owner and the lowercase repo name are compared separately.
@@ -100,6 +100,8 @@ A label is skipped if it is exactly a popular name, or if it has a character tha
 
 1. Distance: the label and the popular name are both at least 5 characters long, and they are one edit apart. An edit is one insertion, one deletion, one substitution, or one swap of two neighbouring characters.
 2. Confusable fold: the popular name is at least 5 characters long, and the label and the popular name differ as written but are equal after the fold. The fold is, in this order: replace `0` with `o`; replace `1` with `l`; then repeat replacing `rn` with `m` and `vv` with `w` until neither is left. There are no other substitutions.
+
+An ordinary word that is one edit from a popular package name is flagged too, for example the host label of `moments.com`.
 
 If several popular names match, the first in alphabetical order is named. A lookalike is a Caution with reason `lookalike`, never a Block: "Caution. <label> looks like the popular name <popular>, from the lookalike-name check (<date>)." It can turn "No known reports" into a Caution, and it never changes a Block or an Unknown. The date comes from the same clock as the rest of the check.
 

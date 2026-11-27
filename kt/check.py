@@ -206,6 +206,8 @@ def _read_popular(root):
                 if not line or line.startswith("#"):
                     continue
                 names.add((eco, normalize_package(eco, line)))
+    if not names:
+        raise ValueError("popular lists are empty")
     return frozenset(names)
 
 
@@ -239,8 +241,9 @@ def is_popular(ecosystem, name, root=None):
     eco = _canonical_ecosystem(ecosystem)
     if eco is None:
         return False
+    names = _popular_names(root)  # an unreadable or empty list raises; it is not "not popular"
     try:
-        return (eco, normalize_package(eco, name)) in _popular_names(root)
+        return (eco, normalize_package(eco, name)) in names
     except ValueError:
         return False
 
@@ -348,10 +351,13 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
     item_type = item["item_type"]
     indicator = item["indicator_defanged"]
     # Always consult config/popular/; there is no way to bypass a listed name.
+    popular_failed = False
+    popular = False
     try:
+        _popular_names()  # load first so an unreadable or empty list fails for every item type
         popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
-    except OSError:
-        popular = False  # the lookalike check below reports the unreadable list as check_failed
+    except (OSError, ValueError):
+        popular_failed = True  # an unknown popular status never turns a hit into a Block
     if health and health.get("status") == "failing":
         reason = health.get("reason") or "failed"
         explanation = ("Unknown. I couldn't finish the check: health check failing: %s. "
@@ -423,7 +429,10 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
             if klass == "malicious" or any(h.get("kind") == "malicious" for h in hits):
                 hit = next((h for h in hits if h.get("kind") == "malicious"), {"id": "MAL", "date": date})
                 url = "https://osv.dev/vulnerability/%s" % hit["id"]
-                if popular:
+                if popular_failed:
+                    if "check_failed" not in reasons:
+                        reasons.append("check_failed")
+                elif popular:
                     reasons.append("pending_review")
                     matched.append(_match(hit["id"], url, "osv"))
                     deciding = _best(deciding, RESULT_RANK["caution"], "osv", date,
@@ -508,7 +517,8 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
     # Lookalike-name check (SPEC.md §3.3): Caution only; an unreadable popular list is check_failed.
     look = LK.check(item)
     if look["class"] == "check_failed":
-        reasons.append("check_failed")
+        if "check_failed" not in reasons:
+            reasons.append("check_failed")
     elif look["class"] == "lookalike":
         reasons.append("lookalike")
         deciding = _best(deciding, RESULT_RANK["caution"], "lookalike", _date10(now),

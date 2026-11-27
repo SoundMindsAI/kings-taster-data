@@ -1865,6 +1865,169 @@
     ]
    },
    "note": "Four characters, so the distance rule does not apply."
+  },
+  {
+   "id": "lookalike-pkg-with-osv-mal",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodsah@1.0.0"
+   },
+   "setup": {
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "lookalike",
+     "malicious_match"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A lookalike never softens a Block."
+  },
+  {
+   "id": "lookalike-pkg-missing-required-source",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodsah@1.0.0"
+   },
+   "setup": {
+    "osv": {
+     "status": "failed",
+     "http_status": 500
+    },
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "lookalike",
+     "check_failed"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A lookalike never turns a failed required source into Caution."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-clean-pkg",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:unrelated-name-xyz@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "lookalike",
+     "malicious_match"
+    ]
+   },
+   "note": "An unreadable popular list is Unknown (SPEC.md §3.3)."
+  },
+  {
+   "id": "lookalike-popular-list-empty-clean-pkg",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:unrelated-name-xyz@1.0.0"
+   },
+   "setup": {
+    "popular_list": "empty",
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "lookalike",
+     "malicious_match"
+    ]
+   },
+   "note": "A comment-only popular list is Unknown (SPEC.md §3.3)."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-mal-hit",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodash@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "malicious_match",
+     "pending_review"
+    ]
+   },
+   "note": "Without the popular list a live MAL- hit is neither Block nor held at Caution."
+  },
+  {
+   "id": "lookalike-popular-list-empty-mal-hit",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodash@1.0.0"
+   },
+   "setup": {
+    "popular_list": "empty",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "malicious_match",
+     "pending_review"
+    ]
+   },
+   "note": "An empty popular list behaves like an unreadable one."
+  },
+  {
+   "id": "lookalike-link-ordinary-word-moments",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://moments[.]com/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "An ordinary word one edit from a popular name is flagged too (SPEC.md §3.3)."
   }
  ],
  "canonicalization_vectors": {

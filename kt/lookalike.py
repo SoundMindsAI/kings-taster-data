@@ -16,10 +16,8 @@ _FIELD = re.compile(r"^[a-z0-9@._/-]{1,256}\Z")
 
 def fold(text):
     """Fixed confusable fold: 0->o, 1->l, then rn->m and vv->w until neither remains."""
-    text = text.lower().replace("0", "o").replace("1", "l")
-    while "rn" in text or "vv" in text:
-        text = text.replace("rn", "m").replace("vv", "w")
-    return text
+    # One pass is enough: m and w cannot join with a neighbour to form a new rn or vv.
+    return text.lower().replace("0", "o").replace("1", "l").replace("rn", "m").replace("vv", "w")
 
 
 def distance(a, b):
@@ -47,22 +45,36 @@ def match_label(label, popular):
     label = label.lower()
     if not label or not label.isascii():
         return None
-    names = set(popular)
-    if label in names:
+    prepared = _prepare(popular)
+    if label in prepared[0]:
         return None
     folded = fold(label)
-    for name in sorted(names):
-        if len(name) < MIN_LEN or not name.isascii():
-            continue
-        if fold(name) == folded:
+    for name, fname in prepared[1]:
+        if fname == folded:
             return name
-        if len(label) >= MIN_LEN and distance(label, name) <= 1:
+        if len(label) >= MIN_LEN and abs(len(label) - len(name)) <= 1 and distance(label, name) <= 1:
             return name
     return None
 
 
+_PREPARED = {}
+
+
+def _prepare(popular):
+    """(set of names, sorted [(name, folded)] of eligible names); cached per frozenset."""
+    if isinstance(popular, frozenset) and popular in _PREPARED:
+        return _PREPARED[popular]
+    names = set(popular)
+    eligible = [(n, fold(n)) for n in sorted(names) if len(n) >= MIN_LEN and n.isascii()]
+    prepared = (names, eligible)
+    if isinstance(popular, frozenset):
+        _PREPARED.clear()
+        _PREPARED[popular] = prepared
+    return prepared
+
+
 def popular_union(root=None):
-    """Union of canonical names in config/popular/ (npm and PyPI). Raises OSError if unreadable."""
+    """Union of canonical names in config/popular/ (npm and PyPI). Raises OSError if unreadable, ValueError if empty."""
     from . import check
     return frozenset(name for _, name in check._popular_names(root))
 

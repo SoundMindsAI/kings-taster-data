@@ -20,9 +20,9 @@ A live OSV `MAL-` or alias is Block; other hits are Caution ("upgrade to ≥ X" 
 
 Read keys only from `~/.kings-taster/keys.env` (`chmod 600`).
 
-Run the Commands exactly. Save raw responses to unread temp files. Extractors print at most 10 allowlisted lines. Write the finding under `~/.kings-taster/findings/` in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding, opened if asked why.
+Run the Commands exactly. Save raw responses to unread temp files. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/`. Reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding. Open it when asked why.
 
-Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block or Unknown. Never cache a link. Cache the RDAP bootstrap for 7 days.
+Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block or Unknown. Never cache a link. Cache RDAP bootstrap for 7 days.
 
 <!-- commands -->
 ## Commands
@@ -36,7 +36,7 @@ Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list
 - IANA: `GET https://data.iana.org/rdap/dns.json`, then `GET` the matching RDAP server (HTTPS, max-redirs 0).
 - Safe Browsing v5: `POST https://safebrowsing.googleapis.com/v5/urls:search` with at most 50 URLs, including Google's test URL. Before using a Safe Browsing key, require it to match `^[A-Za-z0-9_-]{1,128}$`. If it doesn't, that source has failed. Check with a whole-string match such as `[[ $SAFE_BROWSING_KEY =~ ^[A-Za-z0-9_-]{1,128}$ ]]` or `re.fullmatch`, never grep. Pass a matching key with `printf 'x-goog-api-key: %s\n' "$SAFE_BROWSING_KEY" | curl -H @- --data @FILE ...` (`-H @-` uses stdin, so the POST body must be `--data @FILE`) so it never appears in argv or the URL. Never print the key.
 - List file (only allowed redirect): with two fresh `mktemp` files per request (`$RAW` and `$CODE`), removed after use, including on failure, `curl --proto =https --max-redirs 1 -sS -L -o "$RAW" -w '%{url_effective}\n' > "$CODE"` for `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and `latest.json.sig`. The effective host must be `github.com` or `release-assets.githubusercontent.com`. Fetch `manifest.json` (and `.sig`) and the shard for the item's `match_key` the same way. Verify the directory with `scripts/verify.sh DIR --allowed-signers allowed_signers --state ~/.kings-taster/verify-state.json --update-state` (or `python3 -E -s -m kt.verify`). That runs `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE` (or `-I kings-taster-next`), checks each file's SHA-256 and `file_type` against `latest.json` and each shard against `manifest.json`, enforces the 64 KiB signature cap, honors `keys.json` and `root_pins` (a missing `keys.json` is refused once the pins are published), writes a watermark with `--update-state` after a successful verify, and uses `--state` to refuse rollback. A failed verify is `unverified_list`.
-
+- Lookalike (no network): from the repo root, run `cd <repo> && python3 -E -s -m kt.lookalike package|repo|link "$INDICATOR"`. It prints `class clean|lookalike|check_failed`, and `label` and `match` on a flag. A match is Caution (`lookalike`), never Block. Compare the canonical package name (and a scoped npm name's unscoped part), each lowercase repo owner and repo name, and each host label except the TLD (skip IPs and non-ASCII) against every `config/popular/` name. Do not flag an exact popular name. Flag when both have 5+ characters and Damerau-Levenshtein distance ≤ 1, or they match after this fold, in order: `0`→`o`, `1`→`l`, then `rn`→`m` and `vv`→`w` until neither remains (popular name 5+ characters). Cite the alphabetically first match. An unreadable list is Unknown (`check_failed`).
 ### extract-osv
 python3 -I -c '
 import json,re,sys
@@ -170,7 +170,7 @@ print("sb_hits %d" % len(threats))
 for t in threats[:7]: print("threat %s" % t)
 print("class %s" % ("hit" if threats else "clean"))
 ' "$RAW"
-- Lookalike (no network): run `python3 -E -s -m kt.lookalike`. A match is Caution (`lookalike`), never Block. Compare the canonical package name (and a scoped npm name's unscoped part), each lowercase repo owner and repo name, and each host label except the TLD (skip IPs and non-ASCII) against every `config/popular/` name. Do not flag an exact popular name. Flag when both have 5+ characters and Damerau-Levenshtein distance ≤ 1, or they match after this fold, in order: `0`→`o`, `1`→`l`, then `rn`→`m` and `vv`→`w` until neither remains (popular name 5+ characters). Cite the alphabetically first match. An unreadable list is Unknown (`check_failed`).
+
 ### google-notice
 Advisory provided by Google
 Google works to provide the most accurate and up-to-date information about unsafe web resources. However, Google cannot guarantee that its information is comprehensive and error-free: some risky sites may not be identified, and some safe sites may be identified in error.
