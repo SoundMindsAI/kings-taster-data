@@ -83,10 +83,7 @@ If you think a list entry is wrong, email support@soundminds.ai or open an issue
 
 ## Contributing
 
-This repo is read-only to the public, and we don't accept pull requests from outside contributors. A pull
-request from anyone outside SoundMinds is closed automatically. If you think a verdict or a list entry is wrong,
-open an issue. If you've found a security flaw, don't open an issue: report it privately as described in
-[SECURITY.md](SECURITY.md). The full rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+If you think a verdict or a list entry is wrong, open an issue or email support@soundminds.ai. We don't accept pull requests from anyone outside SoundMinds, and any we receive are closed automatically. If you've found a security flaw, don't open an issue: report it privately as described in [SECURITY.md](SECURITY.md). The full rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Data notice
 

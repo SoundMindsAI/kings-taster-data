@@ -11,8 +11,7 @@ the change ourselves.
 
 ## A wrong verdict or list entry
 
-Open an issue in this repo. Say what was checked (the package and version, the repo, or the link written
-defanged, for example `hxxps://example[.]com/`), what King's Taster answered, and why you think it's wrong.
+Open an issue in this repo, or email support@soundminds.ai. Say what was checked (the package and version, the repo, or the link written with its scheme and dots disguised so it can't be clicked, for example `hxxps://example[.]com/`), what King's Taster answered, and why you think it's wrong.
 Please don't include personal details, keys or anything private. We acknowledge within 2 business days. A wrong
 entry is revoked in the next signed list, or right away if it's urgent.
 
