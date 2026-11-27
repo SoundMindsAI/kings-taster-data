@@ -4,6 +4,7 @@ The bot follows skills/kings-taster-first-run.md. This module sequences those st
 for tests. It never contacts X: a poster, if provided, must be a dry-run double
 passed in by the caller.
 """
+import errno
 import fcntl
 import json
 import os
@@ -200,10 +201,19 @@ def save_state(path, doc):
 
 
 def _state_lock(path):
-    """Exclusive lock on path.lock, held for the reservation/write."""
+    """Exclusive lock on path.lock, held for the reservation/write.
+
+    The lock file is opened with O_NOFOLLOW so a symlink cannot redirect
+    the open (or file creation) outside the state directory.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     lock_path = path + ".lock"
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise ValueError("state lock path must not be a symlink") from e
+        raise
 
     class _Lock:
         def __enter__(self):
@@ -217,19 +227,10 @@ def _state_lock(path):
     return _Lock()
 
 
-_USED_GUARDS = {}
-_USED_GUARDS_LOCK = threading.Lock()
-
-
-def _used_lock(used):
-    """In-process lock so two threads sharing the same used dict serialize reservations."""
-    key = id(used)
-    with _USED_GUARDS_LOCK:
-        lock = _USED_GUARDS.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _USED_GUARDS[key] = lock
-        return lock
+# One in-process lock for cap reservations. The file lock covers cross-process
+# access; this covers concurrent threads (including ones that passed distinct
+# used dicts). A single lock also avoids a growing map keyed by id(used).
+_CAP_LOCK = threading.Lock()
 
 
 class _null_lock:
@@ -240,9 +241,15 @@ class _null_lock:
         return False
 
 
+def package_version():
+    """Return this package's running version, or None if it is missing."""
+    import kt as pkg
+    return getattr(pkg, "__version__", None)
+
+
 def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
         routing_choice="just_this_bot", chief_name=None, ticked=None, delivery="paste",
-        running_version="1.0.0", used=None, limits=None, poster=None, state_path=None,
+        running_version=None, used=None, limits=None, poster=None, state_path=None,
         post_ok=True):
     """One first-run (or later user-requested) setup attempt.
 
@@ -251,16 +258,19 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
     and a failed post is treated as the read-only fallback when the flow would
     have posted.
 
-    `running_version` must be an ASCII x.y.z string (from the verified package or
-    release, not free text). The already_done flag can only add to a persisted
+    `running_version` must be an ASCII x.y.z string. If omitted, the package
+    version (`kt.__version__`) is used. A missing or invalid version fails
+    closed before any post. The already_done flag can only add to a persisted
     connectivity_done value, never clear it. Caps fail closed: missing or
     corrupt limits, or a missing state path when usage cannot be reserved
     safely, means no post (a private read-only check may still run). State is
     loaded and validated before any post. Usage is reserved atomically (lock
-    file and temp+rename, or an in-process lock on a shared used dict) at the
-    yes, before the post, so two concurrent yeses get at most one post.
+    file and temp+rename, plus one in-process cap lock) at the yes, before the
+    post, so two concurrent yeses get at most one post.
     """
-    # Refuse a bad version before any post or state write.
+    # Refuse a bad version before any post or state write. No silent default.
+    if running_version is None:
+        running_version = package_version()
     if not CONN.SEMVER.match(running_version if isinstance(running_version, str) else ""):
         raise ValueError("running version is not x.y.z")
 
@@ -287,8 +297,7 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
     used_now = _copy_used(caller_used)
 
     file_lock = _state_lock(state_path) if state_path else _null_lock()
-    mem_lock = _used_lock(used)
-    with file_lock, mem_lock:
+    with file_lock, _CAP_LOCK:
         state = load_state(state_path) if state_path else {}
         # Flag can only add, never clear a persisted connectivity_done.
         effective_done = bool(already_done) or bool(state.get(STATE_KEY))
@@ -313,10 +322,6 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
                 state["week"] = used_now["week"]
                 state["items"] = dict(used_now["items"])
                 save_state(state_path, state)
-        elif state_path and trigger == "first_run" and not effective_done and trigger in ("first_run", "user_request"):
-            # First-run attempt (including a decline) is marked done, with no extra report count.
-            # Only mark when this is a real first_run that will offer.
-            pass
 
         left = 0
         if caps_ok:
@@ -330,10 +335,8 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
         if state_path and will_offer and trigger == "first_run":
             state = load_state(state_path) if os.path.exists(state_path) else state
             state[STATE_KEY] = True
-            if "day" not in state and persisted is None and not reserved:
-                # Keep decline-only state as done, without inventing usage if none exists.
-                pass
-            else:
+            # Keep decline-only state as done, without inventing usage if none exists.
+            if "day" in state or persisted is not None or reserved:
                 state["day"] = used_now["day"]
                 state["week"] = used_now["week"]
                 state["items"] = dict(used_now["items"])
@@ -399,5 +402,5 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
         "read_only": read_only,
         "counts_as_report": flow["counts_as_report"],
         "counts_as_threat_report": False,
-        "used": _copy_used(used_now if reserved or used_now else used),
+        "used": _copy_used(used_now),
     }

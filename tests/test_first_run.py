@@ -414,6 +414,41 @@ class TestStateAndCapsFailClosed(unittest.TestCase):
         self.assertTrue(state[CONN.STATE_KEY])
         self.assertEqual(state["items"]["connectivity"], 1)
 
+    def test_concurrent_yeses_with_separate_used_dicts_post_at_most_once(self):
+        # Distinct used dicts must still share the module cap lock (and the
+        # state file for the actual counts).
+        results = []
+
+        def one():
+            poster = F.DryRunPoster()
+            used = {"day": 0, "week": 0, "items": {}}
+            out = F.run("first_run", offer_answer="yes", send_answer="yes",
+                        poster=poster, used=used, state_path=self.state,
+                        limits=self.limits)
+            results.append((out["posted"], len(poster.posts)))
+
+        t1 = threading.Thread(target=one)
+        t2 = threading.Thread(target=one)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+        posts = sum(1 for posted, n in results if posted is not None)
+        self.assertLessEqual(posts, 1, results)
+        state = load(self.state)
+        self.assertEqual(state["items"]["connectivity"], 1)
+
+    def test_symlinked_lock_path_is_refused(self):
+        victim_dir = os.path.join(self.tmp, "outside")
+        os.makedirs(victim_dir)
+        victim = os.path.join(victim_dir, "victim")
+        os.symlink(victim, self.state + ".lock")
+        poster = F.DryRunPoster()
+        with self.assertRaises(ValueError) as ctx:
+            F.run("first_run", offer_answer="yes", send_answer="yes",
+                  poster=poster, state_path=self.state, limits=self.limits)
+        self.assertIn("symlink", str(ctx.exception).lower())
+        self.assertEqual(poster.posts, [])
+        self.assertFalse(os.path.exists(victim))
+
 
 class TestVersionGate(unittest.TestCase):
     def test_fullwidth_and_malformed_versions_refused_before_post(self):
@@ -431,3 +466,32 @@ class TestVersionGate(unittest.TestCase):
     def test_ascii_semver_is_accepted(self):
         self.assertTrue(CONN.draft_allowed("KT 2.3.4 is live and checking", "2.3.4"))
         self.assertFalse(CONN.draft_allowed("KT 2.3.4 is live and checking", "1.0.0"))
+
+    def test_omitted_version_comes_from_the_package_not_a_hardcoded_default(self):
+        import inspect
+        import kt
+        self.assertIsNone(inspect.signature(F.run).parameters["running_version"].default)
+        poster = F.DryRunPoster()
+        orig = kt.__version__
+        try:
+            kt.__version__ = "3.4.5"
+            self.assertEqual(F.package_version(), "3.4.5")
+            out = F.run("user_request", offer_answer="yes", send_answer="yes",
+                        poster=poster, limits=_limits())
+            self.assertEqual(out["posted"], "KT 3.4.5 is live and checking")
+        finally:
+            kt.__version__ = orig
+
+    def test_missing_or_invalid_package_version_is_refused_before_post(self):
+        import kt
+        poster = F.DryRunPoster()
+        orig = kt.__version__
+        try:
+            for v in (None, "", "1.0", "１.０.０"):
+                kt.__version__ = v
+                with self.assertRaises(ValueError):
+                    F.run("first_run", offer_answer="yes", send_answer="yes",
+                          poster=poster, limits=_limits())
+                self.assertEqual(poster.posts, [])
+        finally:
+            kt.__version__ = orig
