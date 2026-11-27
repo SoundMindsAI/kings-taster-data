@@ -372,6 +372,8 @@ class TestSignAndRelease(SignAndReleaseBase):
         rc, out = self.run_script("--from-dir", d, "--dry-run", "--bootstrap")
         self.assertNotIn("circuit breaker tripped", out)
         self.assertNotIn("needs_human", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("DRY RUN OK", out)
 
     def test_dry_run_signs_and_verifies(self):
         keep = os.path.join(self.tmp, "signed")

@@ -348,7 +348,28 @@ def _status_of(src):
     # Missing evidence is failed evidence: canary_ok must be exactly True and extracted a dict.
     if src.get("canary_ok") is not True or not isinstance(extracted, dict):
         return "failed"
-    return src.get("status") or "ok"
+    if not _has_evidence(src.get("source"), extracted):
+        return "failed"
+    if src.get("status") not in (None, "ok"):
+        return "failed"
+    return "ok"
+
+
+def _has_evidence(source, extracted):
+    cls = extracted.get("class")
+    if source == "osv":
+        return cls in ("clean", "vulnerable", "malicious")
+    if source == "kings_taster_list":
+        hits = extracted.get("hits")
+        return cls == "clean" or (isinstance(hits, list) and len(hits) > 0)
+    if source == "safe_browsing":
+        return cls in ("clean", "hit")
+    if source == "rdap":
+        return cls in ("ok", "no_rdap")
+    if source == "github_api":
+        name = extracted.get("full_name")
+        return isinstance(name, str) and bool(name)
+    return isinstance(cls, str) and bool(cls)
 
 
 def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00Z",

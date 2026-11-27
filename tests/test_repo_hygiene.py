@@ -94,6 +94,18 @@ class TestSecretScan(unittest.TestCase):
         d = tmpdir(self)
         self._write(d, "img.png", b"\0" + FAKE["aws_access_key"].encode())
         self.assertEqual(secret_scan.main([d]), 0)
+        out = {"fail": [], "flag": []}
+        secret_scan.scan_tree(d, out)
+        self.assertTrue(any("skipped_binary" in x for x in out["flag"]), out)
+
+    def test_text_file_with_binary_extension_is_scanned(self):
+        d = tmpdir(self)
+        self._write(d, "notes.png", (FAKE["aws_access_key"] + "\n").encode())
+        out = {"fail": [], "flag": []}
+        secret_scan.scan_tree(d, out)
+        self.assertTrue(any("aws_access_key" in x for x in out["fail"]), out)
+        self.assertEqual(out["flag"], [])
+        self.assertEqual(secret_scan.main([d]), 1)
 
     def test_work_dir_skipped_only_at_top_level(self):
         secret = (FAKE["aws_access_key"] + "\n").encode()

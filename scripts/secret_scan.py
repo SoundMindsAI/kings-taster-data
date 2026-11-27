@@ -114,9 +114,13 @@ def scan_text(label, text, out):
 def scan_tree(root, out):
     count = 0
     for p in iter_files(root):
-        if os.path.splitext(p)[1].lower() in BINARY_EXTS:
-            continue
         try:
+            if os.path.splitext(p)[1].lower() in BINARY_EXTS:
+                with open(p, "rb") as f:
+                    head = f.read(8192)
+                if b"\0" in head:
+                    out["flag"].append("%s: skipped_binary (known binary extension, not scanned)" % os.path.relpath(p, root))
+                    continue
             if os.path.getsize(p) > MAX_FILE:
                 out["fail"].append("%s: skipped_large_file (over %d bytes, not scanned)" % (os.path.relpath(p, root), MAX_FILE))
                 continue
