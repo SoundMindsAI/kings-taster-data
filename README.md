@@ -24,7 +24,7 @@ This describes the King's Taster bot once it's available from the install page.
 
 When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what you ask it to check and what comes back, like anything else you ask it, and it also sees any key you add. A finding is shared only when you approve the exact post, each time.
 
-The bot will also offer, once, to post a public reply with fixed text and its version number, so you can see it's connected. It asks first, and the reply carries no finding data.
+The bot will also offer, once, to post a public reply on X with fixed text and its version number, so you can see it's connected. It will ask first. Anyone can see that the account uses King's Taster, and the reply won't include what you checked or what King's Taster answered.
 
 The full rules are in [SPEC.md §10.1](SPEC.md#101-data-sharing-rules).
 
@@ -47,8 +47,9 @@ Each release also holds the list split into shards, 518 of them for now (`shard-
 `pypi`, and one shard each for `kev`, `domain`, `url`, `ip`, `hash` and `repo_owner`). npm and PyPI entries go to
 the shard named by the first byte of the SHA-256 of their `match_key`. Shards have no `.sig` of their own. Instead,
 each shard's SHA-256 is listed in the signed `manifest.json`, so a changed shard is caught. A bot will download
-only the shard it needs. That shows GitHub the item's group, never the item itself, and for npm and PyPI only a
-hash bucket shared by many items. See [SPEC.md §6.5](SPEC.md#65-sharding).
+only the shard it needs. That never shows GitHub the item itself. For npm and PyPI, GitHub sees the item's group
+and a hash bucket shared by many items. For the other groups, which are not split, GitHub sees the whole group.
+See [SPEC.md §6.5](SPEC.md#65-sharding).
 
 Fixed download URLs:
 `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and

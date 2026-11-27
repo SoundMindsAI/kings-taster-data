@@ -310,7 +310,7 @@ whole list, but a bot will download only the shard it needs.
   cap, that group's prefix length will be raised. In a later live build that day (238,548 entries), the manifest
   was 122 KB, npm shards were 34 to 40 KB gzipped (802 to 958 entries each), PyPI shards were 2 to 4 KB
   gzipped, and the `kev` shard was 57 KB gzipped.
-- **Privacy.** Fetching a shard never shows GitHub the item itself. For npm and PyPI, GitHub sees only a hash
+- **Privacy.** Fetching a shard never shows GitHub the item itself. For npm and PyPI, GitHub sees the item's group and a hash
   bucket shared by many items. For the other groups, which are not split, GitHub sees the whole group.
 
 ## 7. Pipeline and signing
@@ -437,7 +437,7 @@ Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at 
 | Your bot's AI provider | your request, the validated fields, the finding record, and any key you add |
 | OSV.dev | package names and versions (private-registry names only if you choose) |
 | npm and PyPI registries | package names, through metadata lookups |
-| GitHub | the repo owner and name, plus downloads of `latest.json`, the manifest and the shard for each item (your IP address). A shard never shows the item itself: for npm and PyPI it shows only a hash bucket shared by many items, and for the other groups it shows the whole group (§6.5). |
+| GitHub | the repo owner and name, plus downloads of `latest.json`, the manifest and the shard for each item (your IP address). A shard never shows the item itself: for npm and PyPI it shows the item's group and a hash bucket shared by many items, and for the other groups it shows the whole group (§6.5). |
 | IANA, RDAP servers | the bootstrap file request, and the domain |
 | Your link-reputation provider | what that provider's lookup needs |
 | The link's own site | nothing |
@@ -452,7 +452,7 @@ release requirement.
 answer: the package name and version, the repo's owner and name, or the domain (or the link's 4-byte hash prefix
 for Safe Browsing). Nothing about you is sent, with two exceptions. Like any web request, each lookup carries your bot computer's IP address. And a Safe Browsing key, if you add one, goes to Google with that lookup.
 The daily list download goes to GitHub: `latest.json`, the manifest and the shards a check needs. A shard
-never shows GitHub the item itself. For npm and PyPI, GitHub sees only a hash bucket shared by many items.
+never shows GitHub the item itself. For npm and PyPI, GitHub sees the item's group and a hash bucket shared by many items.
 For the other groups, which are not split, GitHub sees the whole group (§6.5). Your IP address goes only to
 the sources being queried, and to GitHub for the list downloads. It is never written into a report or any X post. Posting works the way any post on X
 does: X sees the account that posts it.
