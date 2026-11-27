@@ -1,0 +1,25 @@
+name: close-outside-prs
+
+# This repo doesn't accept pull requests from outside contributors (see CONTRIBUTING.md).
+# Safety: pull_request_target runs in the base repo's context, so this workflow must NEVER check out,
+# build or run anything from the pull request. Its only step calls the GitHub API through gh.
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    if: ${{ !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Close the pull request with a pointer to CONTRIBUTING.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          gh pr close "$PR_URL" --comment "Thanks for your interest. This repo doesn't accept outside pull requests, so this one has been closed automatically. Please see CONTRIBUTING.md: report a wrong verdict in an issue, and report a security flaw privately as described in SECURITY.md."

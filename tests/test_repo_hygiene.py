@@ -107,11 +107,29 @@ class TestRepoRules(unittest.TestCase):
             self.assertNotIn("KT_SIGNING_KEY", txt)
             self.assertNotIn("secrets.", txt)
             self.assertNotIn("ssh-keygen -Y sign", txt)
-            self.assertIn("permissions:\n  contents: read", txt)
+            if os.path.basename(p) == "close-outside-prs.yml":
+                self.assertIn("permissions:\n  pull-requests: write\n\njobs:", txt)
+            else:
+                self.assertIn("permissions:\n  contents: read", txt)
+                self.assertNotIn("pull_request_target", txt)
             for line in txt.splitlines():  # expressions only as env/with values, never inside run scripts
                 if "${{" in line:
                     self.assertRegex(line, r"^\s+[A-Za-z_-]+:\s*\$\{\{[^}]*\}\}\s*$", line)
                     self.assertNotRegex(line, r"^\s+run:")
+
+    def test_close_outside_prs_never_runs_pr_code(self):
+        """pull_request_target runs with base-repo rights: the job may only call the API, never touch PR code."""
+        with open(os.path.join(REPO, ".github", "workflows", "close-outside-prs.yml")) as f:
+            txt = f.read()
+        self.assertIn("pull_request_target:", txt)
+        self.assertNotIn("uses:", txt)          # no actions at all, so no checkout
+        for bad in ("checkout", "git ", "head.sha", "head.ref", "pull_request.head", "npm ", "pip ", "python"):
+            self.assertNotIn(bad, txt)
+        self.assertEqual(txt.count("permissions:"), 1)
+        self.assertIn('fromJSON(\'["OWNER","MEMBER","COLLABORATOR"]\')', txt)
+        self.assertIn("author_association", txt)
+        self.assertIn("gh pr close", txt)
+        self.assertIn("CONTRIBUTING.md", txt)
 
     def test_no_key_material_committed(self):
         for p in glob.glob(os.path.join(REPO, "**", "*"), recursive=True):
