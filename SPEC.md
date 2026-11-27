@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.1, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.2, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -26,9 +26,7 @@ each citing its sources and their dates. It never says "safe".
   it's safe. Your checks go from your bot to the sources listed, and to your bot's AI provider, never to
   SoundMinds. Any keys you add are visible to your bot's AI.
 - Only the official template link on soundminds.ai is from us; copies from anywhere else are not.
-- You install King's Taster from soundminds.ai/kings-taster. Until every release requirement in this spec has
-  passed, the install button there says "Coming soon" and has no link. The same page links to this repo and
-  to this `SPEC.md`.
+- You will install King's Taster from [soundminds.ai/kings-taster](https://soundminds.ai/kings-taster) once that page is live.
 
 ## 2. Trust model
 
@@ -117,15 +115,16 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
   skills loaded only when needed:
   `kings-taster-check` (400 words plus at most 150 lines of commands), `kings-taster-report` (250),
   `kings-taster-list-refresh` (200 plus at most 40 lines), `kings-taster-routing` (250 plus the 30-word line in
-  §4C), and `kings-taster-build` (3,000 plus at most 300 lines of snippets), which loads only to build or update
+  §4C), `kings-taster-health` (250 plus at most 40 lines of fixed health commands, §4D), and `kings-taster-build` (3,000 plus at most 300 lines of snippets), which loads only to build or update
   the checker.
 - A verdict is **5 lines or fewer**: the result and item; the deciding source and date; the other sources and
   their status; the reason code if Unknown or Caution; the path of the full finding record
   (`~/.kings-taster/findings/`), opened only when the user asks why.
 - READMEs, lockfiles, descriptions, scripts and raw responses never enter the AI's context; `conformance.json`
   and `iocs.json` are read from disk by code, never loaded whole.
-- Routines are one line pointing to a skill (a daily list refresh, a weekly conformance rerun if the checker is
-  used, and a weekly routing check from §4C) and are silent unless something changed for the user.
+- There are two routines, each one line pointing to a skill: a daily list refresh, and one weekly health check
+  (§4D). The weekly health check covers the conformance rerun and the routing check, so there is one weekly run
+  instead of three. Both are silent unless something changed for the user.
 - **Caching:** the list file is kept until a new signed `latest.json` appears (compare its hash first).
   Package and repo verdicts may be reused for the same name, version and list-file hash within 24 hours,
   showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
@@ -155,9 +154,9 @@ At first run, King's Taster asks "Who routes your work?" and offers three choice
 King's Taster saves your answer and the names of the covered bots in `~/.kings-taster/routing.json`. That file
 holds bot names only, never their instructions.
 
-Once a week, a routine runs "Run kings-taster-routing-check." For each covered bot, King's Taster confirms the
-line is still there. It reads the bot's instructions if it can see them. If you approved it at first run, it
-asks the bot to answer yes or no. Otherwise, it asks you.
+Once a week, the health check (§4D, item 4) confirms that the line is still there in each covered bot. It isn't
+a separate routine. King's Taster reads the bot's instructions if it can see them. If you approved King's Taster
+messaging that bot at first run, it asks the bot to answer yes or no. Otherwise, it asks you.
 
 - The weekly check is silent when the line is in place.
 - If the line is missing, King's Taster sends you one nudge that week, "The King's Taster line is missing from
@@ -168,12 +167,42 @@ asks the bot to answer yes or no. Otherwise, it asks you.
 Some bot setups don't let one bot list, read or message another. Where that's the case, you paste the line
 yourself, and the weekly check asks you instead of the bot. The spec doesn't assume these abilities exist.
 
-The `kings-taster-routing` skill loads only at first run, at the weekly check, or when you ask about routing.
+The `kings-taster-routing` skill loads only at first run, or when you ask to change the routing.
 The 30-word line is the only text King's Taster adds to any other bot's always-on instructions.
 
-Before release, all three first-run paths are tested. The tests confirm that King's Taster never changes another
+Before release, all three first-run paths must pass tests. Those tests must confirm that King's Taster never changes another
 bot without your paste or approval, that the line is 30 words or fewer, and that the weekly check stays silent
 when the line is present and sends one nudge when it's removed.
+
+## 4D. Health checks
+
+**One weekly self-check.** A routine runs "Run kings-taster-health." It is silent when everything passes. It
+checks four things:
+
+1. **The list file:** it is fresh (under 48 hours old), its signature verifies, its version isn't older than the
+   last one accepted, its date isn't more than 10 minutes ahead of `date -u`, and it is under the size cap (§7.5).
+2. **Canaries:** for each required source, the fixed known-bad test item is caught. That means the OSV canary
+   package, the list file's fake entry for each type, and Google's Safe Browsing test URL if it's set up. RDAP
+   gets a fixed known domain.
+3. **The checker,** if it's in use: its SHA-256 still matches the approved one, and `conformance.json` passes 100%.
+4. **The routing line** is still in each covered bot (§4C).
+
+If item 1, 2 or 3 fails, the bot tells you in at most 3 lines what failed, since when, and the one thing to do.
+It writes `~/.kings-taster/health.json` with `status: failing`. While that is set, every check answers
+"Unknown, don't proceed (health check failing: <reason>)". The next passing self-check or `status` run clears
+it. A failing checker only switches the bot back to checklist mode; if checklist mode's own canaries pass,
+checks keep working.
+
+If item 4 fails, you get the one weekly nudge from §4C. Verdicts aren't affected, because the checks still work
+and only the routing has a gap.
+
+**Status on demand.** You can say "King's Taster status" at any time. It runs all four items now and replies in
+8 lines or fewer: one line per item, plus the list date and the mode (checklist or checker). It writes the same
+`health.json`.
+
+Before release, tests must break each item one at a time (a stale list, a bad signature, a future date, an
+oversized file, a missing canary, a changed checker and a removed routing line). Each must be reported within
+one self-check or `status` run, items 1 to 3 must turn every check into Unknown, and a pass must clear it.
 
 ## 5. Optional local checker
 
@@ -266,9 +295,28 @@ build stops. All actions are pinned to full commit SHAs. The code uses the Pytho
 - `revoked_entries` lists entries withdrawn after a dispute, a false positive or an upstream withdrawal; once
   revoked, an entry stays revoked in every later file. `min_template_version` tells old template copies to update.
 
-### 7.5 Watchdog
+### 7.5 Watchdog and daily pipeline health check
 
-An hourly check fails, and so alerts the maintainers, if the signed list is more than 26 hours old.
+Today, an hourly watchdog fails, and so alerts SoundMinds, if the signed list is more than 26 hours old. Until
+the first release exists, it passes with a notice.
+
+**Planned, not built yet:** a daily pipeline health check that extends the watchdog and runs after each daily
+build. It will check:
+
+- **Build:** today's `iocs.json` and `latest.json` were built and released.
+- **Signing:** both verify against the current allowed-signers key, and the canary entries are present.
+- **No source went silent.** A source fails if its fetch failed, if it returned zero entries when it shouldn't,
+  or if it added nothing for longer than its usual gap. The starting gaps are 3 days for OSV `MAL-` records and
+  14 days for CISA KEV. They will be tuned from 30 days of history, and the final numbers recorded in this repo.
+- **Size cap:** `iocs.json` must be at most 5 MB. That is a starting cap; the final cap will be set from real
+  sizes plus headroom. Clients will reject a file over the cap as `check_failed`, and a jump of more than 50%
+  from one day to the next will be held for review.
+- **Stale dates:** `generated_at` must be today's date (UTC) and not in the future, and every entry's
+  `first_seen` must be on or before `generated_at`. If there is no new release within 26 hours, SoundMinds is
+  alerted. After 48 hours with no release, clients answer Unknown for list matches on their own (§6.4).
+
+On any failure there is no release that day. The last good file stays live and keeps aging toward the 48-hour
+Unknown point, and SoundMinds is alerted.
 
 ### 7.6 Stats (`stats.json`)
 
@@ -304,7 +352,10 @@ PyPI `description`, RDAP `remarks`, OSV `details`, unexpected hosts, redirects a
 canary that must never run; stale, unverifiable, wrongly signed, rolled-back, swapped and paused files;
 revoked and retired entries; each required source failing or rate limited; a missing link key; precedence;
 popular-name holds; checker tampering and crashes; the token budget; and Google's published URL
-canonicalization vectors (CC-BY 4.0). **Pass bar:** 0 false "No known reports" on known-bad items, 100%
+canonicalization vectors (CC-BY 4.0). Cases for the pre-send block (§10.1) will cover drafts containing an IPv4
+address, an IPv6 address, an email, each path form, the local username, the local hostname, an extra domain and
+free text; each must be refused before "OK to send?", and a draft whose only IP or domain is the defanged
+reported item must pass. Those cases are planned and are not in `conformance.json` yet. **Pass bar:** 0 false "No known reports" on known-bad items, 100%
 Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at least 5 runs per case.
 
 ## 10. Privacy: who sees what
@@ -318,7 +369,46 @@ Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at 
 | IANA, RDAP servers | the bootstrap file request, and the domain |
 | Your link-reputation provider | what that provider's lookup needs |
 | The link's own site | nothing |
-| **SoundMinds** | **nothing**, unless you choose to report something to us |
+| **SoundMinds** | nothing from lookups. The only finding data that leaves is a report you approve each time (§10.1). A "wrong verdict" GitHub issue is one you file yourself; King's Taster never files one. |
+
+### 10.1 Data sharing rules
+
+These rules are a release requirement.
+
+**Lookups send only the item.** A check sends only the item to the official sources named in that check's
+answer: the package name and version, the repo's owner and name, or the domain (or the link's 4-byte hash prefix
+for Safe Browsing). Nothing about you is sent. The one honest exception is that, like any web request, each one
+carries your bot computer's IP address. A Safe Browsing key, if you add one, goes to Google with that lookup.
+The daily list download goes to GitHub. Your IP address goes only to the sources being queried, and to GitHub
+for the list download. It is never written into a report or any X post. Posting works the way any post on X
+does: X sees the account that posts it.
+
+**Reports are the only finding data that leaves.** Every report goes through these steps:
+
+0. **The pre-send block.** A report is built only from the fixed fields of the reply template: the marker line,
+   the item type, the defanged item, the result, the source name and date, and one source link. A fixed
+   scanner then checks the whole draft and refuses it if it finds anything beyond the reported item itself: an
+   IPv4 or IPv6 address, an email address, a file path (`/…`, `~/…`, `C:\…`, `\\…`), a username (the output of
+   `whoami` or `$USER`, any `@handle`, or a name from your bot list), a hostname (the output of `hostname`, or
+   any domain other than the defanged item and the allowlisted source domains in the source link), or any free
+   text outside the template fields. The reported item is exempt only as an exact match to its defanged form,
+   so a malicious IP being reported can appear once, defanged. On a refusal, nothing is shown for approval. You
+   see "Report blocked: it contained <type>", never the matched value, and the draft is deleted. There is no
+   "send anyway"; you may start a fresh report, which is scanned again. In checker mode, `checker.py` runs the
+   same scanner.
+1. King's Taster shows the exact post text, character for character, and where it goes (the official thread's
+   link).
+2. It asks "OK to send?" every time. There is no standing approval, no batch approval and no "always allow".
+   Only a yes to that exact text counts.
+3. A decline is final for that finding. Any change to the text means showing it and asking again.
+4. On a yes, King's Taster posts, reads the post back to confirm it's up, and gives you the live link to the
+   reply. If the post fails, it says "Not sent" and shows the reason.
+
+**The plain statement,** shown at first run, on the King's Taster page and in this repo's README:
+
+> When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your bot's AI (xAI) sees your requests. A finding is shared only when you approve the exact post, each time.
+
+No wording stronger than this statement is ever used.
 
 ## 11. Disputes
 
@@ -335,3 +425,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 |---|---|---|
 | 1.0 | 2026-11-26 | First public version. |
 | 1.1 | 2026-11-26 | Adds §4C (first-run routing and the weekly routing check), the `kings-taster-routing` skill, and the install page. |
+| 1.2 | 2026-11-26 | Adds §4D (the weekly health check and `status`), the `kings-taster-health` skill, the planned daily pipeline health check and size cap (§7.5), and the data sharing rules (§10.1). Folds the weekly routing check into the health check, so there are two routines. |

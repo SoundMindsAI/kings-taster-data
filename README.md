@@ -12,6 +12,12 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
 - **Sources and licenses:** [sources/LICENSES.md](sources/LICENSES.md)
 - **Schemas:** [schema/](schema/) (list file, release pointer, stats, finding record)
 
+## What your bot sends
+
+When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your bot's AI (xAI) sees your requests. A finding is shared only when you approve the exact post, each time.
+
+The full rules are in [SPEC.md §10.1](SPEC.md#101-data-sharing-rules).
+
 ## What's in a release
 
 The first release will be published right after this pull request is merged. Until then, the download links below won't work yet.
