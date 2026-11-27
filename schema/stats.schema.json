@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "King's Taster page stats (stats.json), SPEC.md §7.6. Counts only: no indicators, no handles, no free text, no location.",
+  "type": "object", "additionalProperties": false,
+  "required": ["file_type", "schema_version", "generated_at", "tag", "data_as_of", "window_days", "official",
+               "list", "freshness", "qa", "disputes", "user_reports", "paused"],
+  "properties": {
+    "file_type": {"const": "stats"},
+    "schema_version": {"const": 1},
+    "generated_at": {"$ref": "#/$defs/time"},
+    "tag": {"type": "string", "pattern": "^kt-\\d{8}T\\d{6}Z$"},
+    "data_as_of": {"$ref": "#/$defs/time"},
+    "window_days": {"const": 7},
+    "paused": {"type": "boolean"},
+    "official": {"type": "object", "additionalProperties": false,
+      "required": ["malicious_packages_this_week", "malicious_packages_weekly_12w", "kev_added_this_week",
+                   "kev_added_weekly_12w", "named_campaigns_this_week"],
+      "properties": {
+        "malicious_packages_this_week": {"$ref": "#/$defs/eco_counts"},
+        "malicious_packages_weekly_12w": {"type": "object", "additionalProperties": false, "required": ["npm", "pypi"],
+          "properties": {"npm": {"$ref": "#/$defs/weeks"}, "pypi": {"$ref": "#/$defs/weeks"}}},
+        "kev_added_this_week": {"$ref": "#/$defs/count"},
+        "kev_added_weekly_12w": {"$ref": "#/$defs/weeks"},
+        "named_campaigns_this_week": {"type": "array", "maxItems": 0,
+          "description": "Empty in v1: named campaigns come from human-reviewed vendor sources that aren't licensed yet."}
+      }},
+    "list": {"type": "object", "additionalProperties": false,
+      "required": ["entries_total", "entries_by_source", "added_this_run", "retired_this_week", "revoked_total",
+                   "pending_review_total"],
+      "properties": {
+        "entries_total": {"$ref": "#/$defs/count"},
+        "entries_by_source": {"type": "object", "additionalProperties": {"$ref": "#/$defs/count"}},
+        "added_this_run": {"$ref": "#/$defs/count"},
+        "retired_this_week": {"$ref": "#/$defs/count"},
+        "revoked_total": {"$ref": "#/$defs/count"},
+        "pending_review_total": {"$ref": "#/$defs/count"}}},
+    "freshness": {"type": "object", "additionalProperties": false,
+      "required": ["median_hours_listing_to_list", "sample_size", "source_dates"],
+      "properties": {
+        "median_hours_listing_to_list": {"type": ["number", "null"], "minimum": 0},
+        "sample_size": {"$ref": "#/$defs/count"},
+        "source_dates": {"type": "object", "additionalProperties": {"type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"}}}},
+    "qa": {"$ref": "#/$defs/not_measured"},
+    "disputes": {"$ref": "#/$defs/not_measured"},
+    "user_reports": {"type": "object", "additionalProperties": false, "required": ["status"],
+      "description": "Section 7.3A is not built in v1. When it is, only counts from fixed template fields may be added here; never handles, free text or location.",
+      "properties": {"status": {"const": "not_available"}}}
+  },
+  "$defs": {
+    "time": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "count": {"type": "integer", "minimum": 0, "maximum": 10000000},
+    "weeks": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"$ref": "#/$defs/count"}},
+    "eco_counts": {"type": "object", "additionalProperties": false, "required": ["npm", "pypi"],
+      "properties": {"npm": {"$ref": "#/$defs/count"}, "pypi": {"$ref": "#/$defs/count"}}},
+    "not_measured": {"type": "object", "additionalProperties": false, "required": ["status"],
+      "properties": {"status": {"const": "not_measured"}}}
+  }
+}

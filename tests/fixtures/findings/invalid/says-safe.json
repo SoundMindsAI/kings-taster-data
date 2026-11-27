@@ -1,0 +1,40 @@
+{
+ "finding_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+ "checked_at": "2026-11-26T23:40:00Z",
+ "template_version": "1.0.0",
+ "mode": "checklist",
+ "checker_sha256": null,
+ "item_type": "package",
+ "indicator_defanged": "pypi:bloomcredit-python@99.2.0",
+ "result": "no_known_reports",
+ "reasons": [],
+ "checked_against": [
+  {
+   "source": "osv",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  },
+  {
+   "source": "kings_taster_list",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T06:00:00Z"
+  },
+  {
+   "source": "pypi_registry",
+   "required": false,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  }
+ ],
+ "matched_entries": [],
+ "fixed_version": null,
+ "explanation": "No known reports. This package is safe to install."
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "King's Taster release pointer (latest.json), SPEC.md §7.3",
+  "type": "object", "additionalProperties": false,
+  "required": ["file_type", "schema_version", "generated_at", "tag", "release_base_url", "assets", "paused",
+               "paused_reason", "min_template_version"],
+  "properties": {
+    "file_type": {"const": "latest"},
+    "schema_version": {"const": 1},
+    "generated_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "tag": {"type": "string", "pattern": "^kt-\\d{8}T\\d{6}Z$"},
+    "release_base_url": {"type": "string", "pattern": "^https://github\\.com/SoundMindsAI/kings-taster-data/releases/download/kt-\\d{8}T\\d{6}Z/$"},
+    "assets": {"type": "object", "additionalProperties": false,
+      "required": ["iocs.json", "conformance.json", "stats.json"],
+      "properties": {
+        "iocs.json": {"$ref": "#/$defs/asset"},
+        "conformance.json": {"$ref": "#/$defs/asset"},
+        "stats.json": {"$ref": "#/$defs/asset"}}},
+    "paused": {"type": "boolean"},
+    "paused_reason": {"enum": [null, "qa_bar_missed", "incident", "maintenance", "manual"]},
+    "min_template_version": {"type": "string", "pattern": "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"}
+  },
+  "$defs": {
+    "asset": {"type": "object", "additionalProperties": false, "required": ["sha256", "bytes"],
+      "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                     "bytes": {"type": "integer", "minimum": 1}}}
+  }
+}

@@ -1,0 +1,7 @@
+work/
+__pycache__/
+*.pyc
+# never commit keys
+*.key
+*_ed25519
+id_*

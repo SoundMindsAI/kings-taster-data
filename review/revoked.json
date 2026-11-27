@@ -1,0 +1,4 @@
+{
+  "comment": "Revoked entries (disputes upheld, false positives). Once an id is revoked it stays revoked in every later file. reason is a fixed code.",
+  "revoked": []
+}

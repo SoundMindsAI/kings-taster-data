@@ -1,0 +1,51 @@
+{
+ "finding_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+ "checked_at": "2026-11-26T23:40:00Z",
+ "template_version": "1.0.0",
+ "mode": "checklist",
+ "checker_sha256": null,
+ "item_type": "package",
+ "indicator_defanged": "pypi:bloomcredit-python@99.2.0",
+ "result": "block",
+ "reasons": [
+  "malicious_match",
+  "pending_review"
+ ],
+ "checked_against": [
+  {
+   "source": "osv",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  },
+  {
+   "source": "kings_taster_list",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T06:00:00Z"
+  },
+  {
+   "source": "pypi_registry",
+   "required": false,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  }
+ ],
+ "matched_entries": [
+  {
+   "id": "osv:MAL-2026-20650:pypi:bloomcredit-python",
+   "source_url": "https://osv.dev/vulnerability/MAL-2026-20650",
+   "upstream_origin": "ossf-malicious-packages:kam193",
+   "license": "Apache-2.0",
+   "attribution": "OpenSSF Malicious Packages via OSV.dev"
+  }
+ ],
+ "fixed_version": null,
+ "explanation": "Block. pypi:bloomcredit-python@99.2.0 is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, 2026-11-26). Don't proceed."
+}

@@ -1,0 +1,7 @@
+# King's Taster allowed signers (OpenSSH, ssh-keygen -Y verify). Public keys only.
+# Namespace: kings-taster. At most two keys: the current one and the next one.
+# Format (one line per key):
+#   kings-taster-current namespaces="kings-taster" ssh-ed25519 AAAA... [comment]
+#   kings-taster-next namespaces="kings-taster" ssh-ed25519 AAAA... [comment]
+# Current key added 2026-11-26.
+kings-taster-current namespaces="kings-taster" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPbUEG18sAgnYpzSbowFNT9Rd6ie/I09tScdPwKEjXIz kings-taster-2026-11

@@ -1,0 +1,4 @@
+{
+  "comment": "Owner approvals for Blocks on popular (hold-queue) names. Only the repo owner may add rows (CODEOWNERS); approved_by must be \"owner\". An approval only takes effect if the entry also has at least two distinct upstream origins (SPEC.md §7.2). Fields are fixed; no free text.",
+  "approvals": []
+}
