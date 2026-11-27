@@ -14,7 +14,7 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
 
 ## What's in a release
 
-The first release will be published right after this pipeline is merged. Until then, the download links below won't work yet.
+The first release will be published right after this pull request is merged. Until then, the download links below won't work yet.
 
 Every release is a GitHub release tagged `kt-YYYYMMDDTHHMMSSZ` with these files, each with a detached
 OpenSSH signature (`.sig`, Ed25519, namespace `kings-taster`):
