@@ -415,6 +415,34 @@ class TestDecisions(unittest.TestCase):
             self.assertEqual(data["class"], "injection_seen")
             self.assertNotIn("ignore previous", r.stdout)
 
+    def test_firm_list_hit_survives_print_cap(self):
+        import tempfile
+        key = "npm:lodash"
+        entries = [{"id": "kt:npm:lodash:p%d" % n, "match_key": key, "type": "package",
+                    "first_seen": "2026-11-26", "canary": False,
+                    "review_state": "pending_review"} for n in range(8)]
+        entries.append({"id": "kt:npm:lodash:firm", "match_key": key, "type": "package",
+                        "first_seen": "2026-11-26", "canary": False,
+                        "review_state": "approved"})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shard.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"entries": entries}, fh)
+            r = C.run_extractor("list", path, key)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = C.parse_extracted(r.stdout)
+        self.assertEqual(data["list_hits"], 9)
+        self.assertLessEqual(len(data["hits"]), 8)
+        self.assertTrue(any(h["id"] == "kt:npm:lodash:firm" and h["review_state"] == "approved"
+                            for h in data["hits"]), data["hits"])
+        rec, _ = self._decide(self._package("lodash", "4.17.21", "npm"), [
+            _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
+            _src("kings_taster_list", data, verified=True),
+        ])
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertNotIn("pending_review", rec["reasons"])
+
     def test_popular_list_hit_pending_review_is_caution(self):
         rec, _ = self._list_decision("lodash", "pending_review", "kt:npm:lodash")
         self.assertEqual(rec["result"], "caution")
