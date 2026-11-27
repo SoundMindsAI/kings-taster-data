@@ -123,7 +123,8 @@ def parse_extracted(stdout):
             data.setdefault("hits", []).append({
                 "id": parts[0], "type": parts[1] if len(parts) > 1 else "",
                 "date": parts[2] if len(parts) > 2 else "",
-                "canary": ln.endswith("canary=yes"),
+                "canary": " canary=yes" in ln,
+                "review_state": next((t.split("=", 1)[1] for t in parts if t.startswith("review_state=")), "auto"),
             })
     return data
 
@@ -482,14 +483,24 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
             # carries canary=yes is real list data and must still block.
             hits = [h for h in (extracted.get("hits") or [])
                     if not str(h.get("id") or "").startswith("canary:")]
-            if extracted.get("class") != "clean" and hits:
-                hit = hits[0]
-                url = "https://github.com/SoundMindsAI/kings-taster-data/"
+            # A pending_review hit (popular name, SPEC.md §7.2) is held at Caution;
+            # any other non-canary hit, including approved and auto, blocks.
+            firm = [h for h in hits if h.get("review_state") != "pending_review"]
+            held = [h for h in hits if h.get("review_state") == "pending_review"]
+            url = "https://github.com/SoundMindsAI/kings-taster-data/"
+            if extracted.get("class") != "clean" and firm:
+                hit = firm[0]
                 reasons.append("malicious_match")
                 matched.append(_match(hit["id"], url, "list"))
                 deciding = _best(deciding, RESULT_RANK["block"], "kings_taster_list", date,
                     "Block. %s is listed as malicious by King's Taster list (%s, %s). Don't proceed."
                     % (indicator, url, date))
+            elif extracted.get("class") != "clean" and held:
+                reasons.append("pending_review")
+                matched.append(_match(held[0]["id"], url, "list"))
+                deciding = _best(deciding, RESULT_RANK["caution"], "kings_taster_list", date,
+                    "Caution. Reported malicious by the King's Taster list, pending review, from King's Taster list (%s, %s)."
+                    % (url, date))
         elif name == "rdap":
             if extracted.get("class") == "no_rdap" or not extracted.get("registration"):
                 reasons.append("no_rdap")
