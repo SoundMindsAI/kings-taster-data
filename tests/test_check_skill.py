@@ -19,6 +19,8 @@ UNCLEARED = re.compile(
 FID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 NOW = "2026-11-26T23:40:00Z"
 SHA = "abababababababababababababababababababababababababababababababab"
+# curl status file for extract-osv: HTTP 200 and the exact query URL.
+OSV_STATUS_OK = "osv-status-ok.txt"
 
 
 def _src(name, extracted, *, required=True, status="ok", http_status=200,
@@ -111,7 +113,7 @@ class TestSkillCaps(unittest.TestCase):
 
 class TestExtractors(unittest.TestCase):
     def test_osv_malicious_prints_allowlisted_fields_only(self):
-        r, data = _extract("osv", "osv-mal.json")
+        r, data = _extract("osv", "osv-mal.json", OSV_STATUS_OK)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(data["class"], "malicious")
         self.assertTrue(any(h["id"] == "MAL-2026-20650" for h in data["hits"]))
@@ -122,19 +124,19 @@ class TestExtractors(unittest.TestCase):
             self.assertNotIn(banned, blob, banned)
 
     def test_osv_vulnerable_and_clean(self):
-        r, data = _extract("osv", "osv-vuln.json")
+        r, data = _extract("osv", "osv-vuln.json", OSV_STATUS_OK)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(data["class"], "vulnerable")
         self.assertTrue(any(h["id"] == "PYSEC-2026-2946" for h in data["hits"]))
         # The huge versions list must not be dumped.
         self.assertLessEqual(len(data["lines"]), C.EXTRACTOR_LINE_CAP)
         self.assertNotIn("0.0.100", r.stdout)
-        r, data = _extract("osv", "osv-clean.json")
+        r, data = _extract("osv", "osv-clean.json", OSV_STATUS_OK)
         self.assertEqual(data["class"], "clean")
         self.assertEqual(data.get("osv_count"), 0)
 
     def test_osv_injection_refused_and_does_not_print_free_text(self):
-        r, data = _extract("osv", "osv-injection.json")
+        r, data = _extract("osv", "osv-injection.json", OSV_STATUS_OK)
         self.assertEqual(data["class"], "injection_seen")
         self.assertNotIn("DROP ME", r.stdout)
         self.assertNotIn("also drop", r.stdout)
@@ -203,7 +205,7 @@ class TestDecisions(unittest.TestCase):
         return rec, lines
 
     def test_malicious_osv_is_block(self):
-        r, data = _extract("osv", "osv-mal.json")
+        r, data = _extract("osv", "osv-mal.json", OSV_STATUS_OK)
         rec, lines = self._decide(self._package(), [
             _src("osv", data),
             _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
@@ -215,7 +217,7 @@ class TestDecisions(unittest.TestCase):
         self.assertTrue(lines[0].startswith("Block."))
 
     def test_vulnerable_osv_is_caution(self):
-        r, data = _extract("osv", "osv-vuln.json")
+        r, data = _extract("osv", "osv-vuln.json", OSV_STATUS_OK)
         rec, lines = self._decide(self._package("praisonaiagents", "1.0.0"), [
             _src("osv", data),
             _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
@@ -300,6 +302,24 @@ class TestDecisions(unittest.TestCase):
         r, data = self._live('{"vulns": []}')
         self.assertEqual(data["class"], "clean")
 
+    def test_live_empty_vulns_list_without_status_file_fails_closed(self):
+        # No status file, a missing second argument, an empty file, and an
+        # unreadable path (missing file, directory) must never classify clean.
+        with tempfile.TemporaryDirectory() as tmp:
+            body = os.path.join(tmp, "raw.json")
+            with open(body, "w", encoding="utf-8") as fh:
+                fh.write('{"vulns": []}')
+            r, data = self._live('{"vulns": []}', status=None)
+            self.assertEqual(data["class"], "injection_seen")
+            r, data = _extract("osv", body)  # missing second argument
+            self.assertEqual(data["class"], "injection_seen")
+            r, data = self._live('{"vulns": []}', status="")
+            self.assertEqual(data["class"], "injection_seen")
+            r, data = _extract("osv", body, os.path.join(tmp, "missing.txt"))
+            self.assertEqual(data["class"], "injection_seen")
+            r, data = _extract("osv", body, tmp)  # a directory
+            self.assertEqual(data["class"], "injection_seen")
+
     def test_live_empty_object_without_confirmed_status_fails_closed(self):
         for status in (None, "", "200", "200\nhttps://evil.example/v1/query",
                        "200\nhttp://api.osv.dev/v1/query", "200\nhttps://api.osv.dev.evil.example/",
@@ -351,7 +371,7 @@ class TestDecisions(unittest.TestCase):
             self.assertEqual(data["class"], "injection_seen", body)
 
     def test_popular_malicious_is_pending_review(self):
-        r, data = _extract("osv", "osv-popular-mal.json")
+        r, data = _extract("osv", "osv-popular-mal.json", OSV_STATUS_OK)
         self.assertTrue(C.is_popular("npm", "lodash"))
         rec, lines = self._decide(self._package("lodash", "4.0.0", "npm"), [
             _src("osv", data),
@@ -398,7 +418,7 @@ class TestDecisions(unittest.TestCase):
         self.assertIn("unverified_list", rec["reasons"])
 
     def test_osv_caution_is_shown_when_list_is_unverified(self):
-        r, data = _extract("osv", "osv-vuln.json")
+        r, data = _extract("osv", "osv-vuln.json", OSV_STATUS_OK)
         rec, lines = self._decide(self._package("praisonaiagents", "1.0.0", "PyPI"), [
             _src("osv", data),
             _src("kings_taster_list", {"class": "injection_seen"}, status="failed", http_status=200),
@@ -411,7 +431,7 @@ class TestDecisions(unittest.TestCase):
         self.assertLessEqual(len(lines), 5)
 
     def test_block_wins_over_unknown(self):
-        r, data = _extract("osv", "osv-mal.json")
+        r, data = _extract("osv", "osv-mal.json", OSV_STATUS_OK)
         rec, _ = self._decide(self._package(), [
             _src("osv", data),
             _src("kings_taster_list", {"class": "injection_seen"}, status="failed", http_status=200),

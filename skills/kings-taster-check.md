@@ -47,7 +47,7 @@ def bad():
     print("class injection_seen"); sys.exit(0)
 try: doc=json.load(open(sys.argv[1], encoding="utf-8")); s=(open(sys.argv[2], encoding="utf-8").read().splitlines()+["",""])[:2] if len(sys.argv)>2 else None
 except Exception: bad()
-ok=s is None or (s[0].strip()=="200" and s[1].strip()=="https://api.osv.dev/v1/query"); vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else ([] if doc=={} and s is not None and ok else None)
+ok=s is not None and s[0].strip()=="200" and s[1].strip()=="https://api.osv.dev/v1/query"; vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else ([] if doc=={} and s is not None and ok else None)
 if not ok or not isinstance(vulns, list) or len(vulns)>50 or (isinstance(doc, dict) and "next_page_token" in doc): bad()
 rows=[]
 for v in vulns:
