@@ -181,6 +181,113 @@ class TestRefresh(SignedCacheCase):
         self.assertTrue(R.list_url_allowed(
             "https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"))
 
+    def test_promotion_crash_does_not_leave_a_mixed_cache(self):
+        self.seed_cache(shards=1)
+        before = load(os.path.join(self.cache, "latest.json"))
+        later = os.path.join(self.tmp, "later")
+        B.build(self.src, later, previous_dir=self.release, bootstrap=False, now=T1, root=self.root)
+        from tests.test_sign_verify import sign_dir
+        sign_dir(later, self.key)
+        real = os.rename
+        def crash_before_install(src, dst):
+            if os.path.abspath(dst) == os.path.abspath(self.cache):
+                raise OSError("simulated crash before the new cache was installed")
+            return real(src, dst)
+        os.rename = crash_before_install
+        try:
+            with self.assertRaises(OSError):
+                R.refresh(self.cache, later, fetcher=R.LocalFetcher(later),
+                          allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        finally:
+            os.rename = real
+        # Live cache is either absent (recovered on the next call) or still the old list.
+        bak = R._bak_dir(self.cache)
+        if os.path.isdir(self.cache) and os.path.isfile(os.path.join(self.cache, "latest.json")):
+            after = load(os.path.join(self.cache, "latest.json"))
+            self.assertEqual(after["generated_at"], before["generated_at"])
+        elif os.path.isdir(bak):
+            after = load(os.path.join(bak, "latest.json"))
+            self.assertEqual(after["generated_at"], before["generated_at"])
+        else:
+            self.fail("expected the old cache in place or in the bak directory")
+        # A later refresh recovers and installs one complete tree, never a mix.
+        out = R.refresh(self.cache, later, fetcher=R.LocalFetcher(later),
+                        allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        self.assertTrue(out["ok"], out)
+        latest = load(os.path.join(self.cache, "latest.json"))
+        manifest = load(os.path.join(self.cache, "manifest.json"))
+        self.assertEqual(latest["generated_at"], manifest["generated_at"])
+        self.assertEqual(latest["generated_at"], load(os.path.join(later, "latest.json"))["generated_at"])
+
+    def test_leftover_shard_does_not_block_a_later_refresh(self):
+        self.seed_cache(shards=1)
+        orphan = os.path.join(self.cache, "shard-orphan-not-in-manifest.json")
+        with open(orphan, "w", encoding="utf-8") as f:
+            f.write('{}\n')
+        later = os.path.join(self.tmp, "later")
+        B.build(self.src, later, previous_dir=self.release, bootstrap=False, now=T1, root=self.root)
+        from tests.test_sign_verify import sign_dir
+        sign_dir(later, self.key)
+        out = R.refresh(self.cache, later, fetcher=R.LocalFetcher(later),
+                        allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        self.assertTrue(out["ok"], out)
+        self.assertFalse(os.path.isfile(os.path.join(self.cache, "shard-orphan-not-in-manifest.json")))
+        self.assertEqual(load(os.path.join(self.cache, "latest.json"))["generated_at"],
+                         load(os.path.join(later, "latest.json"))["generated_at"])
+
+    def test_unchanged_path_re_verifies_and_does_not_accept_a_mixed_cache(self):
+        self.seed_cache(shards=1)
+        first = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                          allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertTrue(first["ok"], first)
+        with open(os.path.join(self.cache, "shard-orphan-not-in-manifest.json"), "w", encoding="utf-8") as f:
+            f.write('{}\n')
+        out = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                        allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertTrue(out["ok"], out)
+        self.assertTrue(out["silent"])
+        self.assertFalse(os.path.isfile(os.path.join(self.cache, "shard-orphan-not-in-manifest.json")))
+
+    def test_unchanged_path_and_default_state_write_the_watermark(self):
+        self.seed_cache(shards=0)
+        default = R.default_state_path(self.cache)
+        self.assertFalse(os.path.exists(self.state))
+        out = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                        allowed_signers=self.allowed, now=T0_ISO)  # state omitted
+        self.assertTrue(out["ok"], out)
+        self.assertTrue(os.path.isfile(default))
+        # A second call on the unchanged list still writes/keeps the watermark.
+        out2 = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                         allowed_signers=self.allowed, state=default, now=T0_ISO)
+        self.assertTrue(out2["ok"], out2)
+        self.assertTrue(os.path.isfile(default))
+        # An older signed list is refused against that watermark (and the newer cache).
+        later = os.path.join(self.tmp, "later")
+        B.build(self.src, later, previous_dir=self.release, bootstrap=False, now=T1, root=self.root)
+        from tests.test_sign_verify import sign_dir
+        sign_dir(later, self.key)
+        newer = R.refresh(self.cache, later, fetcher=R.LocalFetcher(later),
+                          allowed_signers=self.allowed, now=T1_ISO)
+        self.assertTrue(newer["ok"], newer)
+        before = load(os.path.join(self.cache, "latest.json"))
+        back = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                         allowed_signers=self.allowed, now=T1_ISO)
+        self.assertFalse(back["ok"], back)
+        self.assertEqual(load(os.path.join(self.cache, "latest.json")), before)
+
+    def test_cache_symlink_is_not_followed(self):
+        victim_dir = os.path.join(self.tmp, "outside")
+        os.makedirs(victim_dir)
+        victim = os.path.join(victim_dir, "latest-victim")
+        os.makedirs(self.cache, exist_ok=True)
+        os.symlink(victim, os.path.join(self.cache, "latest.json"))
+        out = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                        allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertTrue(out["ok"], out)
+        self.assertFalse(os.path.exists(victim))
+        self.assertTrue(os.path.isfile(os.path.join(self.cache, "latest.json")))
+        self.assertFalse(os.path.islink(os.path.join(self.cache, "latest.json")))
+
 
 class TestClientHealth(SignedCacheCase):
     def _health(self, **kw):
@@ -333,3 +440,38 @@ class TestClientHealth(SignedCacheCase):
         self.assertEqual(ok["health"]["status"], "ok")
         self.assertIsNone(ok["unknown_line"])
         self.assertEqual(load(path)["status"], "ok")
+
+    def test_missing_osv_or_rdap_canary_result_fails(self):
+        self.seed_cache(shards=1)
+        path = os.path.join(self.tmp, "health.json")
+        for canaries in (None, {}, {"osv": True}, {"rdap": True}):
+            out = self._health(canaries=canaries, health_path=path)
+            self.assertTrue(out["failing"], canaries)
+            self.assertFalse(out["health"]["items"]["canaries"]["ok"], canaries)
+            self.assertFalse(out["silent"], canaries)
+
+    def test_health_tmp_symlink_does_not_write_outside_the_state_dir(self):
+        self.seed_cache(shards=1)
+        victim_dir = os.path.join(self.tmp, "outside")
+        os.makedirs(victim_dir)
+        victim = os.path.join(victim_dir, "victim")
+        health = os.path.join(self.tmp, "health.json")
+        os.symlink(victim, health + ".tmp")
+        out = self._health(health_path=health)
+        self.assertFalse(out["failing"], out)
+        self.assertFalse(os.path.exists(victim))
+        self.assertTrue(os.path.isfile(health))
+        self.assertFalse(os.path.islink(health))
+
+    def test_weekly_nudge_is_persisted_and_locked(self):
+        self.seed_cache(shards=1)
+        path = os.path.join(self.tmp, "health.json")
+        routing = {"covered": [{"name": "Installer", "line_present": False}]}
+        first = self._health(routing=routing, health_path=path)
+        self.assertIsNotNone(first["nudge"])
+        self.assertIn(H.LINE, first["nudge"])
+        self.assertTrue(os.path.isfile(path + ".lock"))
+        doc = load(path)
+        self.assertIn("Installer", doc.get("nudged") or [])
+        second = self._health(routing=routing, health_path=path)
+        self.assertIsNone(second["nudge"])

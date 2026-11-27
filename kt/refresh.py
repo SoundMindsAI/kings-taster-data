@@ -1,4 +1,6 @@
 """Daily list-refresh skill helpers (SPEC.md §4B). Never contacts the network."""
+import errno
+import fcntl
 import json
 import os
 import posixpath
@@ -111,8 +113,56 @@ class LocalFetcher:
         if not os.path.isfile(src):
             raise FileNotFoundError(name)
         os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-        shutil.copyfile(src, dest)
+        _copy_nofollow(src, dest)
         return {"url": url, "ok": True}
+
+
+def default_state_path(cache_dir):
+    """Default verify-state path: sibling of the cache directory (…/verify-state.json)."""
+    return os.path.join(os.path.dirname(os.path.abspath(cache_dir)), "verify-state.json")
+
+
+def _path_lock(path):
+    """Exclusive lock on path.lock, opened with O_NOFOLLOW."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    lock_path = path + ".lock"
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise ValueError("lock path must not be a symlink") from e
+        raise
+
+    class _Lock:
+        def __enter__(self):
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    return _Lock()
+
+
+def _copy_nofollow(src, dest):
+    """Copy src to dest without following a symlink at dest."""
+    flags = os.O_CREAT | os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW
+    try:
+        fd = os.open(dest, flags, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise ValueError("destination must not be a symlink") from e
+        raise
+    try:
+        with open(src, "rb") as inf:
+            while True:
+                chunk = inf.read(1024 * 1024)
+                if not chunk:
+                    break
+                os.write(fd, chunk)
+    finally:
+        os.close(fd)
 
 
 def _read_json(path):
@@ -131,18 +181,84 @@ def cached_shard_names(cache_dir):
                   if n.startswith("shard-") and n.endswith(".json"))
 
 
+def _work_dir(cache_dir):
+    return os.path.abspath(cache_dir) + ".incoming"
+
+
+def _bak_dir(cache_dir):
+    return os.path.abspath(cache_dir) + ".bak"
+
+
+def recover_cache(cache_dir):
+    """If a previous promote was interrupted, put a complete cache back in place."""
+    cache_dir = os.path.abspath(cache_dir)
+    bak = _bak_dir(cache_dir)
+    if os.path.isdir(cache_dir):
+        return cache_dir
+    if os.path.isdir(bak):
+        os.rename(bak, cache_dir)
+    return cache_dir
+
+
+def _promote(work, cache_dir):
+    """Replace the live cache with the verified work directory, as one swap.
+
+    The live directory is renamed aside, then the work directory is renamed
+    into place. A crash cannot leave a mix of old and new files in the live
+    path: the next call runs recover_cache() and gets one complete tree.
+    """
+    cache_dir = os.path.abspath(cache_dir)
+    work = os.path.abspath(work)
+    bak = _bak_dir(cache_dir)
+    if os.path.isdir(bak):
+        shutil.rmtree(bak)
+    if os.path.isdir(cache_dir):
+        os.rename(cache_dir, bak)
+    os.rename(work, cache_dir)
+    if os.path.isdir(bak):
+        shutil.rmtree(bak)
+
+
+def _cache_generated_at(cache_dir):
+    path = os.path.join(cache_dir, "latest.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        return parse_time(_read_json(path)["generated_at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _verify(dir_path, allowed, state, now, require_shards, update_state):
+    try:
+        code, line = KV.verify_release(
+            dir_path, allowed, state=state, update_state=update_state,
+            now=now, max_age_hours=STALE_HOURS, require_shards=require_shards,
+        )
+    except KV.VerifyError as e:
+        return 1, str(e)[:200]
+    except (OSError, ValueError, KeyError) as e:
+        return 1, type(e).__name__
+    return code, line
+
+
 def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
             state=None, now=None, update_state=True, require_shards=False):
     """Refresh the cached list from a local source directory. Never uses the network.
 
     `source_dir` stands in for the signed release the fetcher would download.
     Returns a dict: ok, silent, changed, fetched, failed, lines.
+    When `state` is omitted, the default verify-state file next to the cache is
+    used so rollback is still checked and, on success, the watermark is written.
     """
     now = parse_time(now) if isinstance(now, str) else (now or utc_now())
     fetcher = fetcher or LocalFetcher(source_dir)
     allowed = allowed_signers or os.path.join(ROOT, "config", "allowed_signers")
-    os.makedirs(cache_dir, exist_ok=True)
-    work = os.path.join(cache_dir, ".incoming")
+    cache_dir = recover_cache(cache_dir)
+    if state is None:
+        state = default_state_path(cache_dir)
+    os.makedirs(os.path.dirname(cache_dir) or ".", exist_ok=True)
+    work = _work_dir(cache_dir)
     if os.path.isdir(work):
         shutil.rmtree(work)
     os.makedirs(work)
@@ -172,7 +288,6 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
     except (OSError, FileNotFoundError):
         return fail("check_failed", "latest.json could not be fetched.")
 
-    # Need the tag to fetch manifest from the dated release, but first compare hashes.
     try:
         incoming_latest = _read_json(os.path.join(work, "latest.json"))
         incoming_sha = _file_sha(os.path.join(work, "latest.json"))
@@ -189,24 +304,31 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
     base = "https://github.com/SoundMindsAI/kings-taster-data/releases/download/%s/" % tag
 
     need_manifest = True
-    if cached_sha and cached_sha == incoming_sha and os.path.isfile(os.path.join(cache_dir, "manifest.json")):
-        need_manifest = False
+    if (cached_sha and cached_sha == incoming_sha
+            and os.path.isfile(os.path.join(cache_dir, "manifest.json"))):
         try:
             cached = _read_json(cached_latest_path)
             gen = parse_time(cached["generated_at"])
             if (now - gen).total_seconds() > STALE_HOURS * 3600:
-                shutil.rmtree(work, ignore_errors=True)
                 return fail("stale_list", "The cached list is older than 48 hours.")
         except (OSError, ValueError, KeyError):
-            pass
+            cached = None
         else:
-            shutil.rmtree(work, ignore_errors=True)
-            result["ok"] = True
-            result["silent"] = True
-            result["changed"] = False
-            result["tag"] = cached.get("tag") or tag
-            result["generated_at"] = cached.get("generated_at")
-            return result
+            # Re-verify the live cache (and write the watermark). A mixed or
+            # leftover-shard cache must not be reported as success.
+            code, line = _verify(cache_dir, allowed, state, now,
+                                 require_shards, update_state)
+            if code == 5:
+                return fail("stale_list", line)
+            if code in (0, 3):
+                shutil.rmtree(work, ignore_errors=True)
+                result["ok"] = True
+                result["silent"] = True
+                result["changed"] = False
+                result["tag"] = cached.get("tag") or tag
+                result["generated_at"] = cached.get("generated_at")
+                return result
+            # Verify failed: rebuild a clean work tree below.
 
     signed = ("manifest.json", "iocs.json", "conformance.json", "stats.json")
     if need_manifest:
@@ -222,19 +344,20 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
             for fn in (name, name + ".sig"):
                 src = os.path.join(cache_dir, fn)
                 if os.path.isfile(src):
-                    shutil.copyfile(src, os.path.join(work, fn))
+                    _copy_nofollow(src, os.path.join(work, fn))
 
-    # Copy cached shards into the work dir, then refetch only those that changed.
     try:
         manifest = _read_json(os.path.join(work, "manifest.json"))
     except (OSError, ValueError):
         return fail("unverified_list", "manifest.json could not be read.")
     listed = {s["file"]: s for s in (manifest.get("shards") or []) if "file" in s}
+    # Only shards named in the new manifest are copied. A leftover cached shard
+    # must not enter the work directory (the official verifier would refuse it).
     for name in cached_shard_names(cache_dir):
-        shutil.copyfile(os.path.join(cache_dir, name), os.path.join(work, name))
         info = listed.get(name)
         if not info:
             continue
+        _copy_nofollow(os.path.join(cache_dir, name), os.path.join(work, name))
         current = _file_sha(os.path.join(work, name))
         if current != info.get("sha256"):
             try:
@@ -243,47 +366,43 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
             except (OSError, FileNotFoundError, ValueError):
                 return fail("check_failed", "A cached shard could not be refetched.")
 
-    # Signed files needed by the official verifier must be present if we have them in the source.
     for name in ("iocs.json", "conformance.json", "stats.json"):
         if not os.path.isfile(os.path.join(work, name)):
             src = os.path.join(source_dir, name)
             sig = src + ".sig"
             if os.path.isfile(src):
-                # These are not fetched over the list-host rules from GitHub in this helper
-                # unless the fetcher can see them. Copy from the provided release dir.
-                shutil.copyfile(src, os.path.join(work, name))
+                _copy_nofollow(src, os.path.join(work, name))
                 if os.path.isfile(sig):
-                    shutil.copyfile(sig, os.path.join(work, name + ".sig"))
+                    _copy_nofollow(sig, os.path.join(work, name + ".sig"))
 
+    prev = _cache_generated_at(cache_dir)
     try:
-        now_val = now
-        code, line = KV.verify_release(
-            work, allowed, state=state, update_state=update_state,
-            now=now_val, max_age_hours=STALE_HOURS, require_shards=require_shards,
-        )
-    except KV.VerifyError as e:
-        return fail("unverified_list", str(e)[:200])
-    except (OSError, ValueError, KeyError) as e:
-        return fail("unverified_list", type(e).__name__)
+        incoming_gen = parse_time(incoming_latest["generated_at"])
+    except (KeyError, ValueError, TypeError):
+        incoming_gen = None
+    if prev is not None and incoming_gen is not None and prev > incoming_gen:
+        return fail("unverified_list", "the incoming list is older than the cached list")
+
+    code, line = _verify(work, allowed, state, now, require_shards, update_state)
     if code == 5:
         return fail("stale_list", line)
-    if code not in (0, 3):  # 3 is paused: the file still verifies
+    if code not in (0, 3):
         return fail("unverified_list", line)
 
     incoming_manifest_sha = _file_sha(os.path.join(work, "manifest.json"))
     changed = (cached_sha != incoming_sha) or (cached_manifest_sha != incoming_manifest_sha) or any(
         n.startswith("shard-") for n in result["fetched"])
-    # Promote the incoming files into the cache (do not delete uncached shards we already had
-    # if they still match; replace only what we have in work).
-    for name in os.listdir(work):
-        src = os.path.join(work, name)
-        if os.path.isfile(src):
-            shutil.copyfile(src, os.path.join(cache_dir, name))
-    shutil.rmtree(work, ignore_errors=True)
+    with _path_lock(cache_dir):
+        recover_cache(cache_dir)
+        # Re-check after the lock: another refresh may have installed a newer list.
+        prev = _cache_generated_at(cache_dir)
+        if prev is not None and incoming_gen is not None and prev > incoming_gen:
+            return fail("unverified_list", "the incoming list is older than the cached list")
+        _promote(work, cache_dir)
 
     result["ok"] = True
     result["changed"] = bool(changed)
-    result["silent"] = True  # success is silent, even when the list was updated
+    result["silent"] = True
     result["lines"] = []
     result["tag"] = tag
     result["generated_at"] = incoming_latest.get("generated_at")

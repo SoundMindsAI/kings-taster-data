@@ -1,7 +1,10 @@
 """Weekly client health skill helpers (SPEC.md §4D). Never contacts the network."""
+import errno
+import fcntl
 import json
 import os
 import re
+import tempfile
 
 from .common import parse_time, sha256_file, utc_now
 from .shards import gzip_size
@@ -62,6 +65,52 @@ def nudge_text(name):
     return MISSING_NUDGE % name + "\n" + LINE
 
 
+def default_state_path(cache_dir):
+    """Default verify-state path: sibling of the cache directory."""
+    return os.path.join(os.path.dirname(os.path.abspath(cache_dir)), "verify-state.json")
+
+
+def default_health_path(cache_dir):
+    """Default health.json path: sibling of the cache directory."""
+    return os.path.join(os.path.dirname(os.path.abspath(cache_dir)), "health.json")
+
+
+def week_id(now):
+    year, week, _ = now.isocalendar()
+    return "%d-W%02d" % (year, week)
+
+
+def _path_lock(path):
+    """Exclusive lock on path.lock, opened with O_NOFOLLOW."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    lock_path = path + ".lock"
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise ValueError("lock path must not be a symlink") from e
+        raise
+
+    class _Lock:
+        def __enter__(self):
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    return _Lock()
+
+
+class _null_lock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 def load_health(path):
     if not path or not os.path.exists(path):
         return {}
@@ -72,14 +121,31 @@ def load_health(path):
     return doc
 
 
-def save_health(path, doc):
+def save_health(path, doc, *, already_locked=False):
+    """Write health.json via a temp file and rename. Does not follow symlinks."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(doc, f, indent=2, sort_keys=True)
-        f.write("\n")
-        f.flush()
-    os.replace(tmp, path)
+
+    def _write():
+        fd, tmp = tempfile.mkstemp(
+            prefix=".health.", suffix=".tmp", dir=os.path.dirname(path) or ".")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(doc, f, indent=2, sort_keys=True)
+                f.write("\n")
+                f.flush()
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    if already_locked:
+        _write()
+        return
+    with _path_lock(path):
+        _write()
 
 
 def _read_json(path):
@@ -163,12 +229,13 @@ def _item2(cache_dir, canaries):
     if missing:
         return False, "list canaries are missing"
     canaries = canaries or {}
-    if canaries.get("osv") is False:
+    # OSV and RDAP are required. Missing or omitted results are a failure.
+    # Safe Browsing is optional when unset; only an explicit False fails.
+    if canaries.get("osv") is not True:
         return False, "the OSV canary was not caught"
-    if canaries.get("rdap") is False:
+    if canaries.get("rdap") is not True:
         return False, "the RDAP canary was not caught"
     if canaries.get("safe_browsing") is False:
-        # Only a failure when the source is set up. None/missing means unset (not a failure).
         return False, "the Safe Browsing canary was not caught"
     return True, "canaries ok"
 
@@ -203,10 +270,10 @@ def _item4(routing):
         if days is not None and days >= 30:
             notes.append(QUIET_NOTE % name)
     if not missing:
-        return True, "routing ok", None, notes
+        return True, "routing ok", None, notes, None
     first = next((n for n in missing if n not in already), None)
     nudge = nudge_text(first) if first else None
-    return False, "the routing line is missing from %s" % ", ".join(missing), nudge, notes
+    return False, "the routing line is missing from %s" % ", ".join(missing), nudge, notes, first
 
 
 def run(*, cache_dir, now=None, status=False, allowed_signers=None, state=None,
@@ -214,31 +281,61 @@ def run(*, cache_dir, now=None, status=False, allowed_signers=None, state=None,
     """Run the four health items against a local cache. Never contacts the network."""
     now = parse_time(now) if isinstance(now, str) else (now or utc_now())
     allowed = allowed_signers or os.path.join(ROOT, "config", "allowed_signers")
+    if state is None and cache_dir:
+        state = default_state_path(cache_dir)
+    if health_path is None and cache_dir:
+        health_path = default_health_path(cache_dir)
     ok1, detail1, list_date = _item1(cache_dir, now, allowed, state)
     ok2, detail2 = _item2(cache_dir, canaries)
     ok3, detail3, mode = _item3(checker)
-    ok4, detail4, nudge, notes = _item4(routing)
+    week = week_id(now)
+    lock = _path_lock(health_path) if health_path else _null_lock()
+    with lock:
+        existing = {}
+        if health_path:
+            try:
+                existing = load_health(health_path)
+            except (OSError, ValueError):
+                existing = {}
+        persisted = []
+        if existing.get("nudge_week") == week:
+            persisted = [n for n in (existing.get("nudged") or []) if isinstance(n, str)]
+        routing = dict(routing or {})
+        already = list(routing.get("already_nudged") or [])
+        for name in persisted:
+            if name not in already:
+                already.append(name)
+        routing["already_nudged"] = already
+        ok4, detail4, nudge, notes, nudge_name = _item4(routing)
+        nudged = list(persisted)
+        if nudge and nudge_name and nudge_name not in nudged:
+            nudged.append(nudge_name)
 
-    failing = not (ok1 and ok2)
-    reason = None
-    if not ok1:
-        reason = detail1
-    elif not ok2:
-        reason = detail2
-    doc = {
-        "status": "failing" if failing else "ok",
-        "reason": reason,
-        "list_date": list_date,
-        "mode": mode,
-        "items": {
-            "list": {"ok": ok1, "detail": detail1},
-            "canaries": {"ok": ok2, "detail": detail2},
-            "checker": {"ok": ok3, "detail": detail3},
-            "routing": {"ok": ok4, "detail": detail4},
-        },
-    }
-    if health_path:
-        save_health(health_path, doc)
+        failing = not (ok1 and ok2)
+        reason = None
+        if not ok1:
+            reason = detail1
+        elif not ok2:
+            reason = detail2
+        doc = {
+            "status": "failing" if failing else "ok",
+            "reason": reason,
+            "list_date": list_date,
+            "mode": mode,
+            "nudge_week": week,
+            "nudged": nudged,
+            "items": {
+                "list": {"ok": ok1, "detail": detail1},
+                "canaries": {"ok": ok2, "detail": detail2},
+                "checker": {"ok": ok3, "detail": detail3},
+                "routing": {"ok": ok4, "detail": detail4},
+            },
+        }
+        if health_path:
+            save_health(health_path, doc, already_locked=True)
+
+    failing = doc["status"] == "failing"
+    reason = doc["reason"]
 
     unknown_line = UNKNOWN_LINE % (reason or "failed") if failing else None
     fail_lines = []
