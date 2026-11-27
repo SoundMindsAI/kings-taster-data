@@ -1,9 +1,13 @@
 {
-  "comment": "Two kinds of canary. upstream: real, long-standing entries that MUST be present in every fetch or the source counts as failed (SPEC.md §4). list: fixed fake entries the list file always carries, one per type, so a bot can prove its matcher works. Fake values use reserved names (.invalid, RFC 5737 TEST-NET, CVE-0000).",
+  "comment": "Two kinds of canary. upstream: real, long-standing entries that MUST be present in every fetch or the source counts as failed (SPEC.md §4). osv_canaries: the package and version the check skill queries per ecosystem; its response must print the listed id. list: fixed fake entries the list file always carries, one per type, so a bot can prove its matcher works. Fake values use reserved names (.invalid, RFC 5737 TEST-NET, CVE-0000).",
   "upstream": {
     "osv-npm": ["MAL-2023-1238"],
     "osv-pypi": ["MAL-2022-7440"],
     "cisa-kev": ["CVE-2021-44228"]
+  },
+  "osv_canaries": {
+    "npm": {"name": "mm-docs-v-2", "version": "1.0.0", "id": "MAL-2023-1238"},
+    "PyPI": {"name": "requuests", "version": "1.0.0", "id": "MAL-2022-7440"}
   },
   "list": [
     {"type": "package", "ecosystem": "npm", "value": "kings-taster-canary-npm"},

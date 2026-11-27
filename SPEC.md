@@ -102,6 +102,7 @@ above; the list file and RDAP still run, and any Block or Caution they find is s
   fixed fake entry per type (§6.2); the link-reputation source is tested with its provider's test URL. A missing
   canary means Unknown (`check_failed`).
 - **Time** comes from `date -u` only. **Paging** follows OSV's `next_page_token`.
+- An HTTP 200 reply with body `{}` from `https://api.osv.dev/v1/query` means zero vulnerabilities. The extractor counts it that way only when the saved status file shows that 200 status, that exact URL, and exit code 0.
 - **Keys** live in `~/.kings-taster/keys.env` (`chmod 600`), are read only as environment variables, and are never printed.
 - **Evidence:** each source in the finding record gets its HTTP status and the SHA-256 of the raw response.
 - A 403 or 429 means `rate_limited` (Unknown, "try again later").
@@ -234,7 +235,7 @@ The fixed texts and test cases for these steps are in the `connectivity` section
 
 ## 5. Optional local checker
 
-King's Taster offers this checker at first run, and it is never on by default. The bot writes one standard-library-only Python file,
+King's Taster offers this checker at first run, and it is never on by default. The offer is made only when the `kings-taster-build` skill is present, during first run or when the user asks to run setup again. The bot writes one standard-library-only Python file,
 `~/.kings-taster/checker.py`, from the build spec and reference snippets in `kings-taster-build`
 (canonicalization, `match_key`, field allowlists). It must pass 100% of `conformance.json` offline, then the
 online canaries, without ever running a package manager's install or build. Before first use the user sees its
