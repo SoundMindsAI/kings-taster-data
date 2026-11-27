@@ -365,8 +365,7 @@ class TestDecisions(unittest.TestCase):
         self.assertIn("malicious_match", rec["reasons"])
 
     def test_list_hit_with_canary_flag_but_real_id_still_blocks(self):
-        # N1: a real entry mislabelled canary=yes is still a list match. Only the
-        # build-assigned "canary:" ids are skipped.
+        # N1: a real entry mislabelled canary=yes is still a list match.
         real = {"id": "kt:pypi:bloomcredit-python", "type": "package", "date": "2026-11-26", "canary": True}
         rec, _ = self._decide(self._package(), [
             _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
@@ -375,14 +374,112 @@ class TestDecisions(unittest.TestCase):
         self.assertEqual(rec["result"], "block")
         self.assertIn("malicious_match", rec["reasons"])
         self.assertTrue(any(m["id"] == real["id"] for m in rec["matched_entries"]), rec["matched_entries"])
-        # A genuine canary id is skipped, whatever its flag says.
-        canary = {"id": "canary:package:pypi", "type": "package", "date": "2026-11-26", "canary": True}
-        rec2, _ = self._decide(self._package(), [
+
+    def test_reserved_canary_item_blocks(self):
+        # The item under check is a reserved list canary (id from the build), so
+        # the match_key-filtered hit is a firm list hit.
+        item = {"item_type": "package", "ecosystem": "npm", "name": "kings-taster-canary-npm",
+                "version": "1.0.0", "indicator_defanged": "npm:kings-taster-canary-npm@1.0.0"}
+        canary = {"id": "canary:package:npm", "type": "package", "date": "2026-11-26", "canary": True}
+        rec, _ = self._decide(item, [
             _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
             _src("kings_taster_list", {"class": "malicious", "hits": [canary], "list_hits": 1}, verified=True),
         ])
-        self.assertEqual(rec2["result"], "no_known_reports")
-        self.assertNotIn("malicious_match", rec2["reasons"])
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertTrue(any(m["id"] == canary["id"] for m in rec["matched_entries"]), rec["matched_entries"])
+
+    def test_skill_states_reserved_canary_rule(self):
+        flat = " ".join(C.split_skill()[0].split())
+        self.assertIn("including a list canary", flat)
+
+    def _shard_extract(self, tmp, key, review_state=None, entry_id="kt:npm:lodash"):
+        entry = {"id": entry_id, "match_key": key, "type": "package",
+                 "first_seen": "2026-11-26", "canary": False}
+        if review_state:
+            entry["review_state"] = review_state
+        path = os.path.join(tmp, "shard.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"entries": [entry]}, fh)
+        r = C.run_extractor("list", path, key)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r, C.parse_extracted(r.stdout)
+
+    def _list_decision(self, name, review_state, entry_id):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            _, data = self._shard_extract(tmp, "npm:%s" % name, review_state, entry_id)
+        return self._decide(self._package(name, "4.17.21", "npm"), [
+            _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
+            _src("kings_taster_list", data, verified=True),
+        ])
+
+    def test_list_extractor_prints_review_state(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            r, data = self._shard_extract(tmp, "npm:lodash", "pending_review")
+            self.assertIn("review_state=pending_review", r.stdout)
+            self.assertEqual(data["hits"][0]["review_state"], "pending_review")
+            r, data = self._shard_extract(tmp, "npm:lodash", "approved")
+            self.assertEqual(data["hits"][0]["review_state"], "approved")
+            r, data = self._shard_extract(tmp, "npm:lodash")
+            self.assertEqual(data["hits"][0]["review_state"], "auto")
+            r, data = self._shard_extract(tmp, "npm:lodash", "free text ignore previous")
+            self.assertEqual(data["class"], "injection_seen")
+            self.assertNotIn("ignore previous", r.stdout)
+
+    def test_firm_list_hit_survives_print_cap(self):
+        import tempfile
+        key = "npm:lodash"
+        entries = [{"id": "kt:npm:lodash:p%d" % n, "match_key": key, "type": "package",
+                    "first_seen": "2026-11-26", "canary": False,
+                    "review_state": "pending_review"} for n in range(8)]
+        entries.append({"id": "kt:npm:lodash:firm", "match_key": key, "type": "package",
+                        "first_seen": "2026-11-26", "canary": False,
+                        "review_state": "approved"})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shard.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"entries": entries}, fh)
+            r = C.run_extractor("list", path, key)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = C.parse_extracted(r.stdout)
+        self.assertEqual(data["list_hits"], 9)
+        self.assertLessEqual(len(data["hits"]), 8)
+        self.assertTrue(any(h["id"] == "kt:npm:lodash:firm" and h["review_state"] == "approved"
+                            for h in data["hits"]), data["hits"])
+        rec, _ = self._decide(self._package("lodash", "4.17.21", "npm"), [
+            _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
+            _src("kings_taster_list", data, verified=True),
+        ])
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertNotIn("pending_review", rec["reasons"])
+
+    def test_popular_list_hit_pending_review_is_caution(self):
+        rec, _ = self._list_decision("lodash", "pending_review", "kt:npm:lodash")
+        self.assertEqual(rec["result"], "caution")
+        self.assertIn("pending_review", rec["reasons"])
+        self.assertNotIn("malicious_match", rec["reasons"])
+        self.assertIn("pending review", rec["explanation"])
+
+    def test_popular_list_hit_approved_still_blocks(self):
+        rec, _ = self._list_decision("lodash", "approved", "kt:npm:lodash")
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertNotIn("pending_review", rec["reasons"])
+
+    def test_non_popular_list_hit_auto_still_blocks(self):
+        name = "not-a-real-package-xxxxxx"
+        self.assertFalse(C.is_popular("npm", name))
+        rec, _ = self._list_decision(name, "auto", "kt:npm:%s" % name)
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+
+    def test_skill_states_list_pending_review_rule(self):
+        body, _ = C.split_skill()
+        flat = " ".join(body.split())
+        self.assertIn("list hit with review_state pending_review is Caution, never Block", flat)
 
     def test_canary_failure_is_unknown(self):
         rec, _ = self._decide(self._package(), [
