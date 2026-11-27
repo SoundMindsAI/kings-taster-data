@@ -281,11 +281,19 @@ class TestDecisions(unittest.TestCase):
 
     def test_live_empty_object_without_confirmed_status_fails_closed(self):
         for status in (None, "", "200", "200\nhttps://evil.example/v1/query",
-                       "200\nhttp://api.osv.dev/v1/query", "200\nhttps://api.osv.dev.evil.example/"):
+                       "200\nhttp://api.osv.dev/v1/query", "200\nhttps://api.osv.dev.evil.example/",
+                       "200\nhttps://api.osv.dev/v1/querybatch", "200\nhttps://api.osv.dev/"):
             r, data = self._live("{}", status=status)
             self.assertEqual(data["class"], "injection_seen", repr(status))
         r, data = _extract("osv", "osv-empty-object.json", os.path.join(FIX, "does-not-exist.txt"))
         self.assertEqual(data["class"], "injection_seen")
+
+    def test_live_next_page_token_fails_closed(self):
+        r, data = self._live('{"vulns": [], "next_page_token": "x"}')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self._assert_failed_closed(data)
+        r, data = self._live('{"vulns": [], "foo": 1}')
+        self.assertEqual(data["class"], "clean")
 
     def test_live_empty_vuln_entry_fails_closed(self):
         r, data = self._live('{"vulns": [{}]}')
