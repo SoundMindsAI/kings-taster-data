@@ -190,12 +190,6 @@ def host_allowed(host, url_path="", list_redirect=False):
 _POPULAR_FILES = {"npm": "npm.txt", "PyPI": "pypi.txt"}
 _POPULAR_DEFAULT = {}  # ecosystem -> frozenset of canonical names, default ROOT only
 
-# Choice B (pending Eric). True: a live OSV MAL- is Unknown for every name when
-# the applicable popular list can't be used. Set False for choice A: also append
-# malicious_match (Block wins) and keep check_failed and the recorded hit.
-OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED = True
-
-
 def clear_popular_cache():
     """Forget the cached default lists so the next call re-reads config/popular/."""
     _POPULAR_DEFAULT.clear()
@@ -376,7 +370,7 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
             _popular_names()  # repo, link, other: both lists must be usable
         popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
     except (OSError, ValueError):
-        popular_failed = True  # an unknown popular status never turns a hit into a Block
+        popular_failed = True
         reasons.append("check_failed")
     if health and health.get("status") == "failing":
         reason = health.get("reason") or "failed"
@@ -450,12 +444,14 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
                 hit = next((h for h in hits if h.get("kind") == "malicious"), {"id": "MAL", "date": date})
                 url = "https://osv.dev/vulnerability/%s" % hit["id"]
                 if popular_failed:
-                    # check_failed is already in reasons. The hit is still recorded and shown.
+                    # The popular-name hold can't apply, so a live MAL- is Block. check_failed
+                    # is already in reasons; keep the hit in matched and say the list couldn't be read.
+                    reasons.append("malicious_match")
                     matched.append(_match(hit["id"], url, "osv"))
-                    osv_note = ("OSV.dev reports this as malicious (%s, %s), but the popular-name list could not be read."
-                                % (url, date))
-                    if not OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED:
-                        reasons.append("malicious_match")  # choice A: Block wins
+                    osv_note = "The popular-name list couldn't be read."
+                    deciding = _best(deciding, RESULT_RANK["block"], "osv", date,
+                        "Block. %s is listed as malicious by OpenSSF Malicious Packages via OSV.dev (%s, %s). Don't proceed. %s"
+                        % (indicator, url, date, osv_note))
                 elif popular:
                     reasons.append("pending_review")
                     matched.append(_match(hit["id"], url, "osv"))
@@ -603,7 +599,7 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
 
     rec = _record(item, checked, result, reasons, explanation, now, template_version, finding_id,
                   matched=matched, fixed=fixed)
-    lines = _verdict_lines(rec, deciding, finding_path, osv_note if result == "unknown" else None)
+    lines = _verdict_lines(rec, deciding, finding_path, osv_note)
     return rec, lines
 
 

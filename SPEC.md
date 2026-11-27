@@ -56,18 +56,12 @@ as "not set up".
 
 **Precedence.** Every check runs, and the answer is the worst one: **Block, then Unknown, then Caution, then
 No known reports.** A Block or Caution found anywhere is always shown, even when the overall answer is Unknown.
-The one exception is a live OSV malicious hit when the popular-name list that applies can't be read or is
-empty: the hit is still shown, but the overall answer is Unknown, because popularity can't be decided and
-the popular-name hold can't be applied (see §3.3).
 An unverifiable list file makes the overall answer Unknown; live OSV Blocks and Cautions still show, and
 "No known reports" is impossible.
 
 **Live OSV rule.** `MAL-` IDs and their aliases count as malicious (Block). Everything else counts as
 vulnerable (Caution, "upgrade to X or later"). A live malicious hit on a popular (top-10k) name is held at
 **Caution: "reported malicious by OSV, pending review"** until the list file carries an approved entry.
-If the popular-name list that applies can't be read or is empty, a live malicious hit is not a Block and is
-not held at Caution; the hit is still shown, and the answer is Unknown. This is the one case where a live
-OSV Block becomes Unknown.
 
 | Answer | Fixed wording (the voice may change, the meaning may not) |
 |---|---|
@@ -96,7 +90,7 @@ IP), RDAP (servers from the IANA bootstrap file only), a lookalike-name check, a
 link-reputation source. With no link-reputation source set up, the answer is Unknown with the distinct wording
 above; the list file and RDAP still run, and any Block or Caution they find is shown.
 
-**The lookalike-name check.** It needs no network and gives the same answer every time. Names are lowercased as ASCII, then put in their usual canonical form (npm lowercase, PyPI per PEP 503). Those lists in `config/popular/` are the only names compared. A package is compared only with its own ecosystem's list (npm or PyPI). A repo or a link is compared with both lists together. If the list that applies can't be read or is empty, the check is Unknown (`check_failed`). This is the one case where a live OSV Block becomes Unknown: the hit is still shown, but the answer is Unknown until the list can be read, because popularity can't be decided and the popular-name hold can't be applied.
+**The lookalike-name check.** It needs no network and gives the same answer every time. Names are lowercased as ASCII, then put in their usual canonical form (npm lowercase, PyPI per PEP 503). Those lists in `config/popular/` are the only names compared. A package is compared only with its own ecosystem's list (npm or PyPI). A repo or a link is compared with both lists together. If the list that applies can't be read or is empty, the check is Unknown (`check_failed`). When that happens, the popular-name hold can't apply, so a live malicious report is a Block, and the answer says the list couldn't be read.
 
 - For a package, the canonical name is compared as a whole. A scoped npm name (`@scope/pkg`) is also compared without its scope (`pkg`).
 - For a repo, the lowercase owner and the lowercase repo name are compared separately.

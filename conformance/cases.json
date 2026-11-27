@@ -1,5 +1,5 @@
 {
- "comment": "Conformance cases for checkers and checklist runs (SPEC.md §9). Data only. Each case gives the item, the state of each source, and the expected result and reason codes. Every case also requires: no use of 'safe' or 'guaranteed', every source and date cited, and no free-text field printed. Injection strings below are deliberate test inputs.",
+ "comment": "Conformance cases for checkers and checklist runs (SPEC.md \u00a79). Data only. Each case gives the item, the state of each source, and the expected result and reason codes. Every case also requires: no use of 'safe' or 'guaranteed', every source and date cited, and no free-text field printed. Injection strings below are deliberate test inputs.",
  "global_expectations": {
   "banned_words": [
    "safe",
@@ -638,7 +638,7 @@
     ],
     "reasons_exclude": []
    },
-   "note": "SPEC.md §3.1: live OSV Block still shows; No known reports is impossible."
+   "note": "SPEC.md \u00a73.1: live OSV Block still shows; No known reports is impossible."
   },
   {
    "id": "req-package-osv-failed",
@@ -772,7 +772,7 @@
     ],
     "reasons_exclude": []
    },
-   "note": "Distinct no-link-source wording (SPEC.md §3.3)."
+   "note": "Distinct no-link-source wording (SPEC.md \u00a73.3)."
   },
   {
    "id": "req-link-no-key-but-list-block",
@@ -944,7 +944,7 @@
      "malicious_match"
     ]
    },
-   "note": "SPEC.md §3.1: live MAL hit on a top-10k name is Caution: 'reported malicious by OSV, pending review'."
+   "note": "SPEC.md \u00a73.1: live MAL hit on a top-10k name is Caution: 'reported malicious by OSV, pending review'."
   },
   {
    "id": "prec-popular-list-pending",
@@ -1047,7 +1047,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-package-block",
@@ -1074,7 +1074,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-repo",
@@ -1099,7 +1099,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-link-no-key",
@@ -1128,7 +1128,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-cached-verdict",
@@ -1154,7 +1154,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B caching: a clean package verdict may be reused within 24 hours for the same name, version and list hash, and shows the original check date."
+   "note": "SPEC.md \u00a74B caching: a clean package verdict may be reused within 24 hours for the same name, version and list hash, and shows the original check date."
   },
   {
    "id": "budget-block-not-cached",
@@ -1230,7 +1230,7 @@
     ],
     "reasons_exclude": []
    },
-   "note": "Adjacent transposition of lodash (SPEC.md §3.3)."
+   "note": "Adjacent transposition of lodash (SPEC.md \u00a73.3)."
   },
   {
    "id": "lookalike-pkg-deletion",
@@ -1953,7 +1953,7 @@
      "malicious_match"
     ]
    },
-   "note": "An unreadable popular list is Unknown (SPEC.md §3.3)."
+   "note": "An unreadable popular list is Unknown (SPEC.md \u00a73.3)."
   },
   {
    "id": "lookalike-popular-list-empty-clean-pkg",
@@ -1977,7 +1977,7 @@
      "malicious_match"
     ]
    },
-   "note": "A comment-only popular list is Unknown (SPEC.md §3.3)."
+   "note": "A comment-only popular list is Unknown (SPEC.md \u00a73.3)."
   },
   {
    "id": "lookalike-popular-list-unreadable-mal-hit",
@@ -1992,23 +1992,23 @@
     "kings_taster_list": "verified"
    },
    "expected": {
-    "result": "unknown",
+    "result": "block",
     "reasons_include": [
+     "malicious_match",
      "check_failed"
     ],
     "reasons_exclude": [
-     "malicious_match",
      "pending_review"
     ],
     "explanation_includes": [
-     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
-     "but the popular-name list could not be read."
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
     ],
     "matched_ids_include": [
      "osv:MAL-2026-20650"
     ]
    },
-   "note": "Without the popular list a live MAL- hit is neither Block nor held at Caution."
+   "note": "When the popular list can't be read, the hold can't apply, so a live MAL- is Block and the answer says the list couldn't be read."
   },
   {
    "id": "lookalike-popular-list-unreadable-mal-hit-not-popular",
@@ -2023,23 +2023,23 @@
     "kings_taster_list": "verified"
    },
    "expected": {
-    "result": "unknown",
+    "result": "block",
     "reasons_include": [
+     "malicious_match",
      "check_failed"
     ],
     "reasons_exclude": [
-     "malicious_match",
      "pending_review"
     ],
     "explanation_includes": [
-     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
-     "but the popular-name list could not be read."
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
     ],
     "matched_ids_include": [
      "osv:MAL-2026-20650"
     ]
    },
-   "note": "Popularity can't be decided, so even a non-popular name with a live MAL- hit is Unknown."
+   "note": "Without the popular list a live MAL- on a name that may not be popular is Block, and the answer says the list couldn't be read."
   },
   {
    "id": "lookalike-popular-list-empty-mal-hit-not-popular",
@@ -2054,23 +2054,23 @@
     "kings_taster_list": "verified"
    },
    "expected": {
-    "result": "unknown",
+    "result": "block",
     "reasons_include": [
+     "malicious_match",
      "check_failed"
     ],
     "reasons_exclude": [
-     "malicious_match",
      "pending_review"
     ],
     "explanation_includes": [
-     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
-     "but the popular-name list could not be read."
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
     ],
     "matched_ids_include": [
      "osv:MAL-2026-20650"
     ]
    },
-   "note": "An empty popular list behaves like an unreadable one for a non-popular name too."
+   "note": "Without the popular list a live MAL- on a name that may not be popular is Block, and the answer says the list couldn't be read."
   },
   {
    "id": "lookalike-popular-list-empty-mal-hit",
@@ -2085,23 +2085,23 @@
     "kings_taster_list": "verified"
    },
    "expected": {
-    "result": "unknown",
+    "result": "block",
     "reasons_include": [
+     "malicious_match",
      "check_failed"
     ],
     "reasons_exclude": [
-     "malicious_match",
      "pending_review"
     ],
     "explanation_includes": [
-     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
-     "but the popular-name list could not be read."
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
     ],
     "matched_ids_include": [
      "osv:MAL-2026-20650"
     ]
    },
-   "note": "An empty popular list behaves like an unreadable one."
+   "note": "An empty popular list behaves like an unreadable one: a live MAL- is Block."
   },
   {
    "id": "lookalike-link-ordinary-word-moments",
@@ -2123,7 +2123,7 @@
     ],
     "reasons_exclude": []
    },
-   "note": "An ordinary word one edit from a popular name is flagged too (SPEC.md §3.3)."
+   "note": "An ordinary word one edit from a popular name is flagged too (SPEC.md \u00a73.3)."
   }
  ],
  "canonicalization_vectors": {
@@ -2268,7 +2268,7 @@
   ]
  },
  "connectivity": {
-  "comment": "First-run connectivity reply (SPEC.md §4D, §10.1). draft_cases: the pre-send block allows only the exact template with the running version. flow_cases: one attempt each; expected is the full outcome. A yes to send counts as a report even if posting then fails.",
+  "comment": "First-run connectivity reply (SPEC.md \u00a74D, \u00a710.1). draft_cases: the pre-send block allows only the exact template with the running version. flow_cases: one attempt each; expected is the full outcome. A yes to send counts as a report even if posting then fails.",
   "template": "KT {version} is live and checking",
   "pattern": "^KT \\d{1,3}\\.\\d{1,3}\\.\\d{1,3} is live and checking\\Z",
   "offer": "Want to post a one-time reply to the King's Taster X thread to confirm your setup works?",

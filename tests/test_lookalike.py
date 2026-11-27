@@ -259,27 +259,27 @@ class TestDecideWithBadList(unittest.TestCase):
         self.assertEqual(rec["result"], "unknown")
         self.assertIn("check_failed", rec["reasons"])
 
-    OSV_LINE = ("OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-1, 2026-11-26), "
-                "but the popular-name list could not be read.")
+    LIST_NOTE = "The popular-name list couldn't be read."
 
-    def _assert_choice_b_unknown(self, rec):
-        self.assertEqual(rec["result"], "unknown")
+    def _assert_list_failed_mal_is_block(self, rec, name):
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
         self.assertIn("check_failed", rec["reasons"])
-        self.assertNotIn("malicious_match", rec["reasons"])
         self.assertNotIn("pending_review", rec["reasons"])
-        self.assertTrue(rec["explanation"].startswith("Unknown. I couldn't finish the check: "))
-        self.assertIn("Don't proceed until it can be checked.", rec["explanation"])
-        self.assertIn(self.OSV_LINE, rec["explanation"])
+        url = "https://osv.dev/vulnerability/MAL-2026-1"
+        want = ("Block. npm:%s@1.0.0 is listed as malicious by OpenSSF Malicious Packages via "
+                "OSV.dev (%s, 2026-11-26). Don't proceed. %s" % (name, url, self.LIST_NOTE))
+        self.assertEqual(rec["explanation"], want)
         self.assertIn("osv:MAL-2026-1", [m["id"] for m in rec["matched_entries"]])
 
-    def test_unreadable_list_with_live_mal_hit_is_unknown_not_block(self):
-        # Choice B: popular or not, a live MAL- hit is Unknown when the applicable list can't be used.
+    def test_unreadable_list_with_live_mal_hit_is_block(self):
+        # Popular or not, a live MAL- hit is Block when the applicable list can't be used.
         for name in ("lodash", "zzqx-widget"):
             for files in (None, "# comments only\n"):
                 with self.subTest(name=name, files=files):
-                    self._assert_choice_b_unknown(self._decide(files, name, self.MAL))
+                    self._assert_list_failed_mal_is_block(self._decide(files, name, self.MAL), name)
 
-    def test_mal_hit_verdict_shows_the_osv_line(self):
+    def test_mal_hit_verdict_says_the_list_couldnt_be_read(self):
         item = dict(_pkg("lodash"), ecosystem="npm", name="lodash", version="1.0.0")
         old_root = C.ROOT
         try:
@@ -287,26 +287,16 @@ class TestDecideWithBadList(unittest.TestCase):
                 C.ROOT = tmp
                 C.clear_popular_cache()
                 src = TestDecideWiring()._src
-                _, lines = C.decide(item, [src("osv", self.MAL), dict(src("kings_taster_list", {
+                rec, lines = C.decide(item, [src("osv", self.MAL), dict(src("kings_taster_list", {
                     "class": "clean", "hits": [], "list_hits": 0}), verified=True)],
                     now=NOW, template_version="1.0.0", finding_id=FID)
         finally:
             C.ROOT = old_root
             C.clear_popular_cache()
-        self.assertLessEqual(len(lines), 5)
-        self.assertIn(self.OSV_LINE, lines)
-
-    def test_flag_false_is_choice_a_block_wins(self):
-        old = C.OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED
-        C.OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED = False
-        try:
-            rec = self._decide(None, "lodash", self.MAL)
-        finally:
-            C.OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED = old
         self.assertEqual(rec["result"], "block")
-        self.assertIn("check_failed", rec["reasons"])
-        self.assertIn("malicious_match", rec["reasons"])
-        self.assertIn("osv:MAL-2026-1", [m["id"] for m in rec["matched_entries"]])
+        self.assertLessEqual(len(lines), 5)
+        self.assertIn(self.LIST_NOTE, rec["explanation"])
+        self.assertIn(self.LIST_NOTE, lines)
 
     def test_check_failed_is_added_even_if_lookalike_check_says_clean(self):
         # N5: decide() itself records check_failed; it must not depend on kt.lookalike.check.
@@ -436,7 +426,8 @@ class TestSpecAndBuildSkill(unittest.TestCase):
                        "A package is compared only with its own ecosystem's list (npm or PyPI).",
                        "A repo or a link is compared with both lists together.",
                        "If the list that applies can't be read or is empty, the check is Unknown (`check_failed`).",
-                       "This is the one case where a live OSV Block becomes Unknown",
+                       "the popular-name hold can't apply, so a live malicious report is a Block",
+                       "the answer says the list couldn't be read",
                        "the lookalike flag never changes a Block or an Unknown",
                        "A lookalike can turn \"No known reports\" into a Caution",
                        "A name or label is skipped if",
