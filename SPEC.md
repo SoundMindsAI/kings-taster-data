@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.3, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.4, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -124,14 +124,12 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
   and `iocs.json` are read from disk by code, never loaded whole.
 - There are two routines, each one line pointing to a skill: a daily list refresh, and one weekly health check
   (§4D). The weekly health check covers the conformance rerun and the routing check, so the self-check, the conformance rerun and the routing check share one weekly run instead of three separate ones. Both routines are silent unless something changed for the user.
-- **Caching:** until the list is sharded, the list file is kept until a new signed `latest.json` appears
-  (compare its hash first), and the cache is keyed on that single list-file hash. After sharding (§6.5), the
-  cache will be keyed on the manifest hash and each shard's SHA-256, not on a single list-file hash. The
-  manifest and the cached shards will be kept until a new signed manifest appears. The bot will compare the
-  signed `latest.json` and manifest hashes before downloading anything, and will refetch a cached shard only if
-  its SHA-256 in the new manifest changed.
-  Package and repo verdicts may be reused within 24 hours for the same name and version and the same list hash
-  (after sharding, the same manifest hash and shard SHA-256), showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
+- **Caching:** the list is sharded (§6.5), so the cache is keyed on the manifest hash and each shard's SHA-256.
+  The manifest and the cached shards are kept until a new signed manifest appears. The bot compares the signed
+  `latest.json` and manifest hashes before downloading anything, and refetches a cached shard only if its
+  SHA-256 in the new manifest changed.
+  Package and repo verdicts may be reused within 24 hours for the same name and version and the same manifest
+  hash and shard SHA-256, showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
   file is cached for 7 days.
 - A normal check loads 2,000 words or fewer and never loads `kings-taster-build`.
 
@@ -184,7 +182,8 @@ when the line is present and sends one nudge when it's removed.
 checks four things:
 
 1. **The list file:** it is fresh (under 48 hours old), its signature verifies, its version isn't older than the
-   last one accepted, its date isn't more than 10 minutes ahead of `date -u`, and, once the planned size caps exist (§7.5), it is under them.
+   last one accepted, its date isn't more than 10 minutes ahead of `date -u`, and the manifest and every cached
+   shard are under their size caps (§6.5).
 2. **Canaries:** for each required source, the fixed known-bad test item is caught. That means the OSV canary
    package, the list file's fake entry for each type, and Google's Safe Browsing test URL if it's set up. RDAP
    is tested with a fixed, known domain.
@@ -210,6 +209,26 @@ Before release, tests must break each item one at a time (a stale list, a bad si
 oversized file, a missing canary, a changed checker and a removed routing line). Each must be reported within
 one self-check or `status` run, items 1 and 2 must turn every check into Unknown, a failing item 3 must switch
 the bot to checklist mode, and a pass must clear it.
+
+**First-run connectivity check.** This happens once, after the routing step (§4C).
+
+1. King's Taster asks: "Want to post a one-time reply to the King's Taster X thread to confirm your setup
+   works?" It is opt-in, and the default is no.
+2. **On yes,** it shows the exact text, `KT x.y.z is live and checking` (with the running template version),
+   and where it goes (the official thread's link). The approval prompt also says: "This posts publicly from
+   your X account, so anyone can see that this account uses King's Taster." The draft then goes through the
+   pre-send block (§10.1) and "OK to send?". On a yes, it posts and gives you the live link to the reply. If
+   the post fails, it says "Not sent" with the reason, and runs step 3 instead.
+3. **On a decline, "not now" or no answer,** it runs a private, read-only check: it reads the official thread
+   post through the X connection's read tools and reports "X connection works (read-only check)" or the
+   failure. Nothing is posted.
+4. **Once per install.** It records `connectivity_done` in `~/.kings-taster/state.json` and never offers the
+   check again by itself. No routine, health check or other bot can start it. You can ask for it again later,
+   and that goes through the same steps.
+5. A posted reply counts as one report toward the per-install report limits. It carries no finding data and is
+   never counted as a threat report.
+
+The fixed texts and test cases for these steps are in the `connectivity` section of `conformance.json`.
 
 ## 5. Optional local checker
 
@@ -259,24 +278,37 @@ retire. A retired entry gives "Caution: previously listed".
 Package and hash data stays fresh for 48 hours, after which the list file counts as stale (Unknown). URLs, domains and IPs
 are always checked live as well.
 
-### 6.5 Sharding (planned, not built yet)
+### 6.5 Sharding
 
-Until sharding is built, a release uses one `iocs.json` file. A full build from a live fetch of the sources on
-2026-11-26 was 196 MB, or 7.2 MB gzipped, with 238,538 entries, which is too much for a bot to download for
-every check. Those figures come from that live build, not from the recorded test fixtures in this repo, which
-are a different snapshot. The list will therefore be split into shards. This format does not build shards yet.
-When sharding is built, it will work like this:
+A full build from a live fetch of the sources on 2026-11-26 was 196 MB, or 7.2 MB gzipped, with 238,538
+entries, which is too much for a bot to download for every check. Those figures come from that live build, not
+from the recorded test fixtures in this repo, which are a different snapshot. Each release therefore also splits
+the list into shards. The full `iocs.json` stays in every release for the pipeline and for anyone who wants the
+whole list, but a bot downloads only the shard it needs.
 
-- **Shard key.** Entries will be grouped by ecosystem (npm, PyPI) or by type, and then by the first byte of the
-  SHA-256 of each entry's `match_key`. That will give up to 256 shards per ecosystem or type. The prefix length
-  may change so that each shard stays under its cap and still holds many entries.
-- **Signed manifest.** A small signed `manifest.json` will list each shard's name, SHA-256, entry count and size.
-  `latest.json` will point to it.
-- **What the bot fetches.** The bot will download only the shard for the item it's checking, check its SHA-256
-  against the manifest, and cache it (§4B).
-- **Caps.** The manifest will be at most 5 MB, and each shard at most 5 MB gzipped. A client will reject anything
-  over a cap as `check_failed`, and a shard over its cap will fail the build.
-- **Privacy.** Fetching a shard will show GitHub only the item's ecosystem and a hash bucket shared by many items,
+- **Groups.** Each entry belongs to one group, read from the prefix of its `match_key`: `npm`, `pypi`, `kev`
+  (CVE entries), `domain`, `url`, `ip`, `hash` or `repo_owner`.
+- **Shard key.** `npm` and `pypi` are split by the first byte of the SHA-256 of the entry's `match_key` (written
+  as two lowercase hex digits), giving 256 shards each. Every other group, including `kev`, is a single shard.
+  The prefix length for each group is recorded in the manifest's `groups` field (`prefix_bytes`, 0 or 1).
+- **Shard files.** `shard-<group>-<hex>.json` (for example `shard-npm-3f.json`), or `shard-<group>.json` for a
+  single shard. Every shard is published, even an empty one, so a missing shard is always an error. A shard
+  holds the full entries for its bucket, the `revoked_entries` whose `match_key` falls in it, and the same
+  `generated_at` and `tag` as the rest of the release.
+- **Signed manifest.** `manifest.json` lists every shard's name, file, group, bucket, SHA-256, size, gzipped size,
+  entry count, revocation count and entry count per type, plus totals per group and per type. It is signed like
+  the other release files, and `latest.json` gives its SHA-256 and size. Shards are not signed one by one: each is
+  pinned by its SHA-256 in the signed manifest. That keeps a release under GitHub's limit of 1,000 assets per
+  release.
+- **What the bot fetches.** The bot verifies `latest.json` and `manifest.json`, works out the one shard for the
+  item from its `match_key`, downloads it, and checks its SHA-256, size and entry counts against the manifest
+  before using it. It caches shards as described in §4B.
+- **Caps.** The manifest is at most 5 MB, and each shard at most 5 MB gzipped (gzip level 9). The build and the
+  validator refuse anything over a cap, and a client rejects it as `check_failed`. If a shard ever nears its
+  cap, that group's prefix length is raised. In a later live build that day (238,548 entries), the manifest
+  was 122 KB, npm shards were 34 to 40 KB gzipped (802 to 958 entries each), PyPI shards were 2 to 4 KB
+  gzipped, and the `kev` shard was 57 KB gzipped.
+- **Privacy.** Fetching a shard shows GitHub only the item's group and a hash bucket shared by many items,
   never the item itself.
 
 ## 7. Pipeline and signing
@@ -302,8 +334,16 @@ build stops. All actions are pinned to full commit SHAs. The code uses the Pytho
 ### 7.3 Signing and release
 
 - The repo owner signs outside CI with `ssh-keygen -Y sign`, using Ed25519 and the namespace **`kings-taster`**, with one
-  detached `.sig` per file. `config/allowed_signers` holds at most two public keys:
-  `kings-taster-current` and `kings-taster-next`.
+  detached `.sig` per file for `latest.json`, `iocs.json`, `conformance.json`, `stats.json` and `manifest.json`.
+  Shards are covered by their SHA-256 in the signed manifest (§6.5). `config/allowed_signers` holds at most two
+  public keys: `kings-taster-current` and `kings-taster-next`.
+- **Signature files.** A `.sig` file must be at most 64 KiB and hold exactly one OpenSSH signature. A larger file,
+  or one with more than one signature, is refused before `ssh-keygen` runs.
+- **Allowed-signers lines.** Each line is a principal (`kings-taster-current` or `kings-taster-next`), then a
+  comma-separated option list, then an `ssh-ed25519` public key and an optional comment. The options may come in
+  any order. `namespaces="kings-taster"` must appear exactly once; `valid-after="…"` and `valid-before="…"`
+  (OpenSSH date forms) may each appear at most once; any other option, or a repeated one, makes the whole file
+  invalid.
 - Before signing, the owner's script re-validates the artifact, verifies the live release, and requires that
   the new `generated_at` is later and that no revocation was dropped.
 - **Fixed URLs:** `https://github.com/SoundMindsAI/kings-taster-data/releases/download/<tag>/<file>` and
@@ -311,8 +351,8 @@ build stops. All actions are pinned to full commit SHAs. The code uses the Pytho
   `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` (+ `.sig`) names
   the current tag and the SHA-256 and size of each file.
 - Verify with `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE`
-  (or `-I kings-taster-next`), then check each file's hash against `latest.json` and its `file_type`.
-  `scripts/verify.sh` does all of this.
+  (or `-I kings-taster-next`), then check each file's hash against `latest.json` and its `file_type`, and each
+  shard you use against `manifest.json`. `scripts/verify.sh` does all of this.
 
 ### 7.4 Rollback, pause and revocation
 
@@ -330,16 +370,15 @@ the first release exists, it passes with a notice.
 **Planned, not built yet:** a daily pipeline health check that extends the watchdog and runs after each daily
 build. It will check:
 
-- **Build:** today's `latest.json` and list files were built and released. Once the list is sharded (§6.5),
-  that means `latest.json`, `manifest.json` and every shard, with every shard's SHA-256 matching the manifest.
+- **Build:** today's `latest.json`, `manifest.json` and every shard were built and released, with every shard's
+  SHA-256 matching the manifest.
 - **Signing:** both verify against the current allowed-signers key, and the canary entries are present.
 - **No source went silent.** A source fails if its fetch failed, if it returned zero entries when it shouldn't,
   or if it added nothing for longer than its usual gap. The starting gaps are 3 days for OSV `MAL-` records and
   14 days for CISA KEV. They will be tuned from 30 days of history, and the final numbers recorded in this repo.
-- **Size caps:** the manifest must be at most 5 MB, and each shard at most 5 MB gzipped (§6.5). Clients will
-  reject anything over a cap as `check_failed`. A shard over its cap fails the build, and the prefix length is
-  raised. A jump of more than 50% from one day to the next, in total size or in any shard, will be held for
-  review.
+- **Size caps:** the build already refuses a manifest over 5 MB or a shard over 5 MB gzipped (§6.5). The health
+  check will also hold for review a jump of more than 50% from one day to the next, in total size or in any
+  shard.
 - **Stale dates:** `generated_at` must be today's date (UTC) and not in the future, and every entry's
   `first_seen` must be on or before `generated_at`. If there is no new release within 26 hours, SoundMinds is
   alerted. After 48 hours with no release, clients answer Unknown for list matches on their own (§6.4).
@@ -384,7 +423,9 @@ popular-name holds; checker tampering and crashes; the token budget; and Google'
 canonicalization vectors (CC-BY 4.0). Cases for the pre-send block (§10.1) will cover drafts containing an IPv4
 address, an IPv6 address, an email, each path form, the local username, the local hostname, an extra domain and
 free text; each must be refused before "OK to send?", and a draft whose only IP or domain is the defanged
-reported item must pass. Those cases are planned and are not in `conformance.json` yet. **Pass bar:** 0 false "No known reports" on known-bad items, 100%
+reported item must pass. Those cases are planned and are not in `conformance.json` yet. The `connectivity`
+section holds the fixed texts and cases for the first-run connectivity reply (§4D): drafts the pre-send block
+must allow or refuse, and one case per way the check can start or end. **Pass bar:** 0 false "No known reports" on known-bad items, 100%
 Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at least 5 runs per case.
 
 ## 10. Privacy: who sees what
@@ -394,7 +435,7 @@ Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at 
 | Your bot's AI provider | your request, the validated fields, the finding record, and any key you add |
 | OSV.dev | package names and versions (private-registry names only if you choose) |
 | npm and PyPI registries | package names, through metadata lookups |
-| GitHub | the repo owner and name, plus downloads of `latest.json` and the list (your IP address). Once the list is sharded (§6.5), that means the manifest and the shard for each item, which shows its ecosystem and a short hash bucket shared by many items, never the item itself. |
+| GitHub | the repo owner and name, plus downloads of `latest.json`, the manifest and the shard for each item (your IP address). A shard shows only the item's group and a short hash bucket shared by many items, never the item itself (§6.5). |
 | IANA, RDAP servers | the bootstrap file request, and the domain |
 | Your link-reputation provider | what that provider's lookup needs |
 | The link's own site | nothing |
@@ -408,12 +449,15 @@ release requirement.
 **Lookups send only the item.** A check sends only the item to the official sources named in that check's
 answer: the package name and version, the repo's owner and name, or the domain (or the link's 4-byte hash prefix
 for Safe Browsing). Nothing about you is sent, with two exceptions. Like any web request, each lookup carries your bot computer's IP address. And a Safe Browsing key, if you add one, goes to Google with that lookup.
-The daily list download goes to GitHub. Once the list is sharded (§6.5), that means the manifest and shards,
-and a shard shows only the item's ecosystem and a hash bucket shared by many items. Your IP address goes only to
+The daily list download goes to GitHub: `latest.json`, the manifest and the shards a check needs. A shard
+shows only the item's group and a hash bucket shared by many items (§6.5). Your IP address goes only to
 the sources being queried, and to GitHub for the list downloads. It is never written into a report or any X post. Posting works the way any post on X
 does: X sees the account that posts it.
 
-**Reports are the only finding data that leaves.** Every report goes through these steps:
+**Reports are the only finding data that leaves.** The only other post King's Taster can make is the optional,
+one-time connectivity reply (§4D). It carries no finding data and goes through the same steps below. Its only
+allowed text is `KT x.y.z is live and checking`, with the running template version: the pre-send block refuses
+any other text, including any added word, and there is no override. Every report goes through these steps:
 
 1. **The pre-send block.** A report is built only from the fixed fields of the reply template: the marker line,
    the item type, the defanged item, the result, the source name and date, and one source link. A fixed
@@ -457,3 +501,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 | 1.1 | 2026-11-26 | Adds §4C (first-run routing and the weekly routing check), the `kings-taster-routing` skill, and the install page. |
 | 1.2 | 2026-11-26 | Adds §4D (the weekly health check and `status`), the `kings-taster-health` skill, the planned daily pipeline health check and size cap (§7.5), and the data sharing rules (§10.1). Folds the weekly routing check into the health check, so there are two routines. |
 | 1.3 | 2026-11-26 | Adds the planned sharded list (§6.5): shards by ecosystem or type and hash prefix, a signed manifest, per-shard caching and caps, and what a shard download shows GitHub. Clarifies that a failing checker switches the bot to checklist mode rather than answering Unknown, and that the size caps are planned. |
+| 1.4 | 2026-11-26 | Builds the sharded list (§6.5): `manifest.json` (signed) and 518 shards, npm and PyPI split by the first byte of SHA-256(`match_key`), one shard each for KEV and the other types, with 5 MB caps enforced by the build and validator. Adds the first-run connectivity check (§4D) and its pre-send rule (§10.1), with conformance cases. States the signature-file size limit and the allowed-signers option rules (§7.3). |

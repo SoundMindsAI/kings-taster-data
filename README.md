@@ -10,7 +10,7 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
 
 - **Specification:** [SPEC.md](SPEC.md) (versioned with the releases)
 - **Sources and licenses:** [sources/LICENSES.md](sources/LICENSES.md)
-- **Schemas:** [schema/](schema/) (list file, release pointer, stats, finding record)
+- **Schemas:** [schema/](schema/) (list file, release pointer, shard manifest, stats, finding record)
 
 ## How to use it
 
@@ -28,17 +28,24 @@ The full rules are in [SPEC.md §10.1](SPEC.md#101-data-sharing-rules).
 
 ## What's in a release
 
-The first release will be published right after this pull request is merged. Until then, the download links below won't work yet.
+The first release hasn't been published yet. Until it is, the download links below won't work.
 
 Every release is a GitHub release tagged `kt-YYYYMMDDTHHMMSSZ` with these files, each with a detached
 OpenSSH signature (`.sig`, Ed25519, namespace `kings-taster`):
 
 | File | What it is |
 |---|---|
-| `iocs.json` | the list file: entries from the sources below, canaries, `revoked_entries`, `paused`, `min_template_version` |
+| `iocs.json` | the full list file: entries from the sources below, canaries, `revoked_entries`, `paused`, `min_template_version` |
+| `manifest.json` | the shard manifest: each shard's file, SHA-256, size, gzipped size and entry counts |
 | `latest.json` | the pointer: tag, `generated_at`, and the SHA-256 and size of each file. Also published at the fixed tag `kt-latest`. |
 | `conformance.json` | test cases (data only) for checkers and checklist runs |
 | `stats.json` | counts only, for the public page |
+
+The release also holds the list split into 518 shards (`shard-npm-00.json` to `shard-npm-ff.json`, the same for
+`pypi`, and one shard each for `kev`, `domain`, `url`, `ip`, `hash` and `repo_owner`). npm and PyPI entries go to
+the shard named by the first byte of the SHA-256 of their `match_key`. Shards have no `.sig` of their own: each
+one is pinned by its SHA-256 in the signed `manifest.json`. A bot downloads only the shard it needs, so GitHub
+sees only a hash bucket shared by many items. See [SPEC.md §6.5](SPEC.md#65-sharding).
 
 Fixed download URLs:
 `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and
@@ -49,7 +56,7 @@ Fixed download URLs:
 ```sh
 ssh-keygen -Y verify -f config/allowed_signers -I kings-taster-current -n kings-taster \
   -s latest.json.sig < latest.json
-# or, for all four files plus hashes, file types, rollback, pause and freshness:
+# or, for all five signed files plus hashes, file types, rollback, pause, freshness and any shards in the folder:
 scripts/verify.sh <download-dir> --allowed-signers config/allowed_signers --state ~/.kings-taster/state.json --update-state
 ```
 
@@ -60,7 +67,8 @@ one you accepted.
 
 - `.github/workflows/pipeline.yml` (daily, and on demand) fetches CISA KEV and the OSV.dev export of OpenSSF
   malicious-package (`MAL-`) records for npm and PyPI over HTTPS, records each source's HTTP status, response
-  SHA-256 and date, then builds and validates the **unsigned** files and uploads them as a workflow artifact.
+  SHA-256 and date, then builds and validates the **unsigned** files and shards, and uploads them as a workflow
+  artifact. The build refuses a manifest over 5 MB or a shard over 5 MB gzipped.
   CI holds no signing key and no secrets.
 - The owner signs and publishes with `scripts/sign-and-release.sh`, which re-validates the artifact, checks it
   against the live release (newer `generated_at`, no dropped revocations), stops on the circuit breaker, signs
