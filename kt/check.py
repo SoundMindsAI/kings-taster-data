@@ -137,6 +137,8 @@ def _split_host_paths(host, url_path):
     URL, the hostname and path come from it; a bare host or a second full URL that
     names another host is a mismatch. With two full URLs both paths are returned.
     """
+    if not isinstance(host, str) or not isinstance(url_path, str):
+        return "", ["/"]
     path = url_path or ""
     raw_host = host or ""
     if any(c <= " " or c == "\x7f" for c in raw_host + path):

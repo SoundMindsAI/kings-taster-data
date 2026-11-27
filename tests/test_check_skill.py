@@ -860,6 +860,17 @@ class TestHosts(unittest.TestCase):
         self.assertFalse(C.host_allowed("https://api.osv.dev:443/v1/query"))
         self.assertTrue(C.host_allowed("https://github.com" + self.LIST_OK))
 
+    def test_non_str_host_or_path_fails_closed(self):
+        # An allowed host/path must still be refused when the argument isn't a str.
+        cases = (
+            (b"api.osv.dev", ""),
+            (None, ""),
+            ("api.osv.dev", b"/v1/query"),
+            ("api.osv.dev", None),
+        )
+        for host, url_path in cases:
+            self.assertFalse(C.host_allowed(host, url_path), (host, url_path))
+
 
 @unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")
 class TestListVerify(unittest.TestCase):
