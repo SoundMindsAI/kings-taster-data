@@ -8,8 +8,9 @@
 #
 # Key: --key PATH or env KT_SIGNING_KEY_PATH. The path and the key are never printed.
 # Steps: get the unsigned artifact -> validate -> check against the live release (signature +
-# monotonic generated_at + revocations) -> circuit breaker -> sign with ssh-keygen -Y sign ->
-# verify our own signatures -> create the dated release -> update the kt-latest pointer.
+# monotonic generated_at + revocations) -> circuit breaker -> pipeline health -> sign with
+# ssh-keygen -Y sign -> verify our own signatures -> create the dated release -> update the
+# kt-latest pointer. Health runs before signing so a fail or hold cannot produce signatures.
 # Shards (shard-*.json) are not signed one by one: each is pinned by its SHA-256 in the signed manifest.json,
 # which keeps a release under GitHub's 1,000-asset limit.
 # --dry-run stops after verification and creates nothing on GitHub.
@@ -136,17 +137,10 @@ if "${PY[@]}" -c 'import json,sys;sys.exit(0 if json.load(open(sys.argv[1]))["ne
   echo "sign-and-release: breaker tripped ($reasons), accepted by operator"
 fi
 
-# 5. Sign, then verify our own signatures.
-for f in "${FILES[@]}"; do
-  [ ! -e "$ART/$f.sig" ] || die "unexpected existing signature"
-  ssh-keygen -Y sign -q -f "$KEY" -n "$NS" "$ART/$f" </dev/null || die "signing failed"
-done
-"${PY[@]}" -m kt.verify "$ART" --allowed-signers "$ALLOWED" --max-age-hours 87600 --require-shards "${NOW_ARGS[@]}" >/dev/null || [ $? -eq 3 ] \
-  || die "our own signatures or shards did not verify"
-
-# 5b. Pipeline health check (SPEC.md §7.5). A failure blocks publish. A size-jump hold
-# needs --accept-health after a person reviews.
-health_args=("$ART" --signed --out "$ART/pipeline-health.json")
+# 5. Pipeline health check (SPEC.md §7.5), before any signing. A failure or an
+# unaccepted size-jump hold must not produce signatures or a publish.
+# Signatures are verified by kt.verify after signing, not by this unsigned check.
+health_args=("$ART" --pre-sign --out "$ART/pipeline-health.json")
 if [ "$HAVE_PREV" -eq 1 ]; then health_args+=(--previous "$PREV"); fi
 set +e
 "${PY[@]}" -m kt.health "${health_args[@]}" "${NOW_ARGS[@]}"
@@ -161,6 +155,14 @@ case "$health_rc" in
   *) die "pipeline health check failed (exit $health_rc); not publishing" ;;
 esac
 
+# 6. Sign, then verify our own signatures.
+for f in "${FILES[@]}"; do
+  [ ! -e "$ART/$f.sig" ] || die "unexpected existing signature"
+  ssh-keygen -Y sign -q -f "$KEY" -n "$NS" "$ART/$f" </dev/null || die "signing failed"
+done
+"${PY[@]}" -m kt.verify "$ART" --allowed-signers "$ALLOWED" --max-age-hours 87600 --require-shards "${NOW_ARGS[@]}" >/dev/null || [ $? -eq 3 ] \
+  || die "our own signatures or shards did not verify"
+
 if [ "$DRY_RUN" -eq 1 ]; then
   OUT="${KT_DRY_RUN_OUT:-}"
   if [ -n "$OUT" ]; then mkdir -p "$OUT"; cp "$ART"/*.json "$ART"/*.sig "$OUT"/; fi
@@ -169,7 +171,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# 6. Publish: dated release first, then move the pointer.
+# 7. Publish: dated release first, then move the pointer.
 NOTES="$WORK/notes.md"
 cat > "$NOTES" <<NOTES_EOF
 King's Taster list file $TAG. Verify with ssh-keygen -Y verify (namespace "$NS"); see config/allowed_signers.

@@ -55,7 +55,8 @@ def _add(report, name, status, detail):
 
 
 def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
-                  require_shards=True, allowed_signers=None, limits=None, root=None):
+                  require_shards=True, allowed_signers=None, limits=None, root=None,
+                  pre_sign=False):
     """Return a health report for a local release directory. Never uses the network."""
     root = root or ROOT
     now = now or utc_now()
@@ -129,10 +130,10 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
         date_ok = False
         if (generated - now).total_seconds() > FUTURE_SKEW_SECONDS:
             _add(report, "dates", "fail", "generated_at is in the future")
-        elif require_shards and not signed and generated.date() != now.date():
+        elif require_shards and not signed and not pre_sign and generated.date() != now.date():
             # Strict "today" only for the daily (unsigned) build, as SPEC.md §7.5 says.
             _add(report, "dates", "fail", "generated_at is not today's date")
-        elif signed:
+        elif signed or pre_sign:
             hours = int(cfg.get("alert_after_hours", 26))
             if (now - generated).total_seconds() > hours * 3600:
                 _add(report, "dates", "fail", "generated_at is older than %d hours" % hours)
@@ -336,6 +337,8 @@ def main(argv=None):
     ap.add_argument("release_dir")
     ap.add_argument("--previous")
     ap.add_argument("--signed", action="store_true")
+    ap.add_argument("--pre-sign", action="store_true",
+                    help="use the signed-path age bound without requiring signatures")
     ap.add_argument("--no-shards", action="store_true",
                     help="skip shard-file checks (hourly watchdog of the pointer files)")
     ap.add_argument("--now", help="UTC time for date and gap checks (tests and KT_NOW)")
@@ -355,7 +358,7 @@ def main(argv=None):
         report = check_release(
             a.release_dir, a.previous, now=a.now, signed=a.signed,
             require_shards=not a.no_shards, allowed_signers=a.allowed_signers,
-            root=a.root,
+            root=a.root, pre_sign=a.pre_sign,
         )
         write_report(out, report)
         sys.stdout.write("%s\n" % report["status"])

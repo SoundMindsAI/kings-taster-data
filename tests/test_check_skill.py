@@ -438,6 +438,17 @@ class TestHosts(unittest.TestCase):
         # Matching host + same-host URL still works.
         self.assertTrue(C.host_allowed("github.com", "https://github.com" + self.LIST_OK))
 
+    def test_query_or_fragment_in_authority_is_refused(self):
+        # N10: '?' or '#' in the authority must not let '@github.com' become the host.
+        allowed = "https://github.com" + self.LIST_OK
+        self.assertTrue(C.host_allowed(allowed))
+        self.assertFalse(C.host_allowed("https://evil.example?x=@" + "github.com" + self.LIST_OK))
+        self.assertFalse(C.host_allowed("https://evil.example#x=@" + "github.com" + self.LIST_OK))
+        host_q, _ = C._split_host_path("https://evil.example?x=@github.com" + self.LIST_OK, "")
+        host_h, _ = C._split_host_path("https://evil.example#x=@github.com" + self.LIST_OK, "")
+        self.assertNotEqual((host_q or "").lower(), "github.com")
+        self.assertNotEqual((host_h or "").lower(), "github.com")
+
 
 @unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")
 class TestListVerify(unittest.TestCase):

@@ -76,6 +76,16 @@ class TestHealthPassAndHolds(HealthCase):
         self.assertEqual(report["status"], "fail")
         self.assertTrue(any("not today's date" in x for x in report["failed"]))
 
+    def test_pre_sign_uses_age_bound_not_calendar_day(self):
+        out = self.build()
+        morning = T0 + dt.timedelta(hours=18)
+        report = self.check(out, now=morning, pre_sign=True)
+        self.assertEqual(report["status"], "ok", report["failed"] + report["holds"])
+        stale = T0 + dt.timedelta(hours=27)
+        report = self.check(out, now=stale, pre_sign=True)
+        self.assertEqual(report["status"], "fail")
+        self.assertTrue(any("older than" in x for x in report["failed"]), report["failed"])
+
     def test_generated_at_in_the_future_is_fail(self):
         out = self.build(now=T0 + dt.timedelta(hours=2))
         report = self.check(out, now=T0)
@@ -395,12 +405,19 @@ class TestHealthSignAndRelease(unittest.TestCase):
         self.harness = SignAndReleaseBase("setUp")
         self.harness.setUp()
 
+    def tearDown(self):
+        self.harness.doCleanups()
+
     def test_sign_and_release_refuses_stale_generated_at(self):
         rc, out = self.harness.run_script(
             "--from-dir", self.harness.unsigned, "--dry-run", "--accept-breaker",
             env_extra={"KT_NOW": "2026-11-29T06:17:00Z"})
         self.assertEqual(rc, 1, out)
         self.assertIn("pipeline health check failed", out)
+        self.assertNotIn("DRY RUN OK", out)
+        from tests.prove_release_gate import signed, published
+        self.assertFalse(signed(self.harness), out)
+        self.assertFalse(published(self.harness), out)
 
     def test_same_day_dry_run_still_publishes_nothing_and_passes(self):
         rc, out = self.harness.run_script(
@@ -448,6 +465,9 @@ class TestHealthSignAndRelease(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("pipeline health check failed (exit 137)", out)
         self.assertNotIn("DRY RUN OK", out)
+        from tests.prove_release_gate import signed, published
+        self.assertFalse(signed(self.harness), out)
+        self.assertFalse(published(self.harness), out)
 
     def test_health_exit_two_is_not_a_hold(self):
         env = self._stub_health_exit(2)
@@ -472,3 +492,21 @@ class TestHealthSignAndRelease(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn("DRY RUN OK", out)
         self.assertIn("health hold accepted by operator", out)
+
+    def test_fail_dry_run_does_not_sign_or_publish(self):
+        from tests.prove_release_gate import format_line, prove_fail
+        result = prove_fail(self.harness)
+        self.assertTrue(result["ok"], format_line(result) + "\n" + result["out"])
+        self.assertFalse(result["signed"])
+        self.assertFalse(result["published"])
+        self.assertFalse(result["x_post"])
+        self.assertTrue(result["artifact_extracted"])
+
+    def test_hold_dry_run_does_not_sign_or_publish(self):
+        from tests.prove_release_gate import format_line, prove_hold
+        result = prove_hold(self.harness)
+        self.assertTrue(result["ok"], format_line(result) + "\n" + result["out"])
+        self.assertFalse(result["signed"])
+        self.assertFalse(result["published"])
+        self.assertFalse(result["x_post"])
+        self.assertTrue(result["artifact_extracted"])

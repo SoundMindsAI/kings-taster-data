@@ -2,6 +2,19 @@ name: tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      prove_release_gate:
+        description: "Harness-only dry-run of the health FAIL or HOLD release gate (default off)"
+        type: boolean
+        default: false
+      prove_case:
+        description: "Which gate to prove (fail or hold)"
+        type: choice
+        options:
+          - fail
+          - hold
+        default: fail
 
 permissions:
   contents: read
@@ -43,3 +56,16 @@ jobs:
           persist-credentials: false
       - name: Every action is pinned to a full commit SHA
         run: python3 -E -s scripts/check_pins.py .github/workflows
+
+  release-gate-prove:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.prove_release_gate }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prove sign-and-release stops on health FAIL or HOLD (dry-run, throwaway key, stub gh)
+        env:
+          PROVE_CASE: ${{ inputs.prove_case }}
+        run: python3 -E -s -m tests.prove_release_gate "$PROVE_CASE"

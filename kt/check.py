@@ -164,6 +164,10 @@ def _split_host_path(host, url_path):
     if source is not None:
         rest = source.split("://", 1)[-1] if "://" in source else source[2:]
         authority, _, remainder = rest.partition("/")
+        # Query or fragment in the authority is not a host (e.g.
+        # https://evil.example?x=@github.com/...). Refuse before the '@' split.
+        if "?" in authority or "#" in authority:
+            return "", "/"
         if "@" in authority:
             authority = authority.rsplit("@", 1)[1]
         # Strip a port, but keep IPv6 in brackets out of scope (we only allow names).
