@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import re
+import tempfile
 import unittest
 
 from kt import check as C
@@ -232,6 +233,91 @@ class TestDecisions(unittest.TestCase):
         self.assertEqual(rec["reasons"], [])
         self.assertTrue(rec["explanation"].startswith("No known reports. Checked against"))
         self.assertFalse(any(l.startswith("Reason:") for l in lines))
+
+    def _live(self, body, status="200\nhttps://api.osv.dev/v1/query", fixture=None):
+        """Run extract-osv on a body plus a curl status file (None = no status file)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, "raw.json")
+            if fixture:
+                raw = os.path.join(FIX, fixture)
+            else:
+                with open(raw, "w", encoding="utf-8") as fh:
+                    fh.write(body)
+            args = [raw]
+            if status is not None:
+                code = os.path.join(tmp, "code.txt")
+                with open(code, "w", encoding="utf-8") as fh:
+                    fh.write(status)
+                args.append(code)
+            return _extract("osv", *args)
+
+    def _clean_list(self):
+        return _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True)
+
+    def _assert_failed_closed(self, data):
+        self.assertEqual(data["class"], "injection_seen")
+        # decide() records OSV injection_seen without also adding check_failed,
+        # so skip validate_record (existing behaviour on this branch).
+        rec, _ = C.decide(self._package("left-pad", "1.3.0", "npm"), [
+            _src("osv", data, status="failed"), self._clean_list(),
+        ], now=NOW, finding_id=FID,
+           finding_path="~/.kings-taster/findings/%s.json" % FID)
+        self.assertEqual(rec["result"], "unknown")
+        self.assertIn("injection_seen", rec["reasons"])
+
+    def test_live_empty_object_is_clean(self):
+        r, data = self._live(None, fixture="osv-empty-object.json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(data["class"], "clean")
+        self.assertEqual(data.get("osv_count"), 0)
+        rec, _ = self._decide(self._package("left-pad", "1.3.0", "npm"), [_src("osv", data), self._clean_list()])
+        self.assertEqual(rec["result"], "no_known_reports")
+
+    def test_live_empty_vulns_list_with_status_is_clean(self):
+        r, data = self._live('{"vulns": []}')
+        self.assertEqual(data["class"], "clean")
+
+    def test_live_empty_object_without_confirmed_status_fails_closed(self):
+        for status in (None, "", "200", "200\nhttps://evil.example/v1/query",
+                       "200\nhttp://api.osv.dev/v1/query", "200\nhttps://api.osv.dev.evil.example/"):
+            r, data = self._live("{}", status=status)
+            self.assertEqual(data["class"], "injection_seen", repr(status))
+        r, data = _extract("osv", "osv-empty-object.json", os.path.join(FIX, "does-not-exist.txt"))
+        self.assertEqual(data["class"], "injection_seen")
+
+    def test_live_empty_vuln_entry_fails_closed(self):
+        r, data = self._live('{"vulns": [{}]}')
+        self._assert_failed_closed(data)
+
+    def test_live_non_200_fails_closed(self):
+        for body in ("{}", '{"vulns": []}'):
+            for status in ("500\nhttps://api.osv.dev/v1/query", "429\nhttps://api.osv.dev/v1/query",
+                           "000\nhttps://api.osv.dev/v1/query"):
+                r, data = self._live(body, status=status)
+                self.assertEqual(data["class"], "injection_seen", (body, status))
+        r, data = self._live("{}", status="500\nhttps://api.osv.dev/v1/query")
+        self._assert_failed_closed(data)
+
+    def test_live_non_object_body_fails_closed(self):
+        for body in ("[]", "null", '"x"', "0", "true", "not json", ""):
+            r, data = self._live(body)
+            self.assertEqual(data["class"], "injection_seen", body)
+
+    def test_live_truncated_body_prints_class(self):
+        r, data = self._live('{"vulns":')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self._assert_failed_closed(data)
+
+    def test_live_error_or_incomplete_body_fails_closed(self):
+        for body in ('{"code": 3, "message": "Invalid argument"}', '{"error": "boom"}',
+                     '{"next_page_token": "x"}', '{"vulns": null}'):
+            r, data = self._live(body)
+            self.assertEqual(data["class"], "injection_seen", body)
+
+    def test_live_timeout_status_fails_closed(self):
+        for body in ("{}", "", '{"vulns":'):
+            r, data = self._live(body, status="000\n")
+            self.assertEqual(data["class"], "injection_seen", body)
 
     def test_popular_malicious_is_pending_review(self):
         r, data = _extract("osv", "osv-popular-mal.json")

@@ -132,7 +132,10 @@ def _build_source(name, token, item):
                 path = os.path.join(tmp, "raw.json")
                 with open(path, "w", encoding="utf-8") as fh:
                     json.dump(token["body"], fh)
-                r = C.run_extractor("osv", path)
+                code = os.path.join(tmp, "code.txt")
+                with open(code, "w", encoding="utf-8") as fh:
+                    fh.write("200\nhttps://api.osv.dev/v1/query")
+                r = C.run_extractor("osv", path, code)
             return _src(name, C.parse_extracted(r.stdout))
         if token.get("status") == "ok" and name == "rdap":
             if token.get("http_status") == 404:
