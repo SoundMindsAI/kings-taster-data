@@ -1,0 +1,1 @@
+Run kings-taster-health.
