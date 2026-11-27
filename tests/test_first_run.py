@@ -49,6 +49,7 @@ class TestSkillTexts(unittest.TestCase):
         self.assertIn(CONN.READ_ONLY_OK, fixed)
         self.assertIn("opt-in", body)
         self.assertIn("default is no", body)
+        self.assertIn("(default no)", body)
         self.assertIn("OK to send?", body)
         self.assertIn("no override", body)
         self.assertIn("never counted as a threat report", body)

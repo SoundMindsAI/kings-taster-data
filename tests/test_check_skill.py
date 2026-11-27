@@ -345,7 +345,7 @@ class TestDecisions(unittest.TestCase):
     def test_live_exit_code_line_required_and_zero(self):
         url = "200\nhttps://api.osv.dev/v1/query"
         bad = (url, url + "\n", url + "\n\n", url + "\n  \n", url + "\n00", url + "\n0.0",
-               url + "\n-0", url + "\n+0", url + "\n0 1", url + "\nx")
+               url + "\n-0", url + "\n+0", url + "\n+1", url + "\n-1", url + "\n0 1", url + "\nx")
         nonzero = (url + "\n1", url + "\n28", url + "\n63", url + "\n7")
         for body in ("{}", '{"vulns": []}'):
             for status in bad:
@@ -430,8 +430,47 @@ class TestDecisions(unittest.TestCase):
 
     def test_live_timeout_status_fails_closed(self):
         for body in ("{}", "", '{"vulns":'):
-            r, data = self._live(body, status="000\n")
-            self.assertEqual(data["class"], "injection_seen", body)
+            r, data = self._live(body, status="000\nhttps://api.osv.dev/v1/query\n28")
+            self.assertEqual(data["class"], "check_failed", body)
+
+    def test_live_000_with_exact_url_and_nonzero_exit_is_check_failed(self):
+        for code in ("28", "7", "6", "60"):
+            status = "000\nhttps://api.osv.dev/v1/query\n" + code
+            for body in ("{}", '{"vulns": []}', "", '{"vulns":'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(data["class"], "check_failed", (body, status))
+        r, data = self._live("{}", status="000\nhttps://api.osv.dev/v1/query\n28")
+        self._assert_failed_closed(data, "check_failed")
+        r, data = self._live(None, status="000\nhttps://api.osv.dev/v1/query\n28", fixture="osv-mal.json")
+        self._assert_failed_closed(data, "check_failed")
+        self.assertNotEqual(data["class"], "malicious")
+
+    def test_live_check_failed_needs_200_or_000_and_exact_url(self):
+        for status in ("500\nhttps://api.osv.dev/v1/query\n28", "429\nhttps://api.osv.dev/v1/query\n7",
+                       "500\nhttps://api.osv.dev/v1/query\n7",
+                       "000\nhttps://api.osv.dev/v1/query\n0",
+                       "000\nhttps://evil.example/v1/query\n7", "200\nhttps://evil.example/v1/query\n7",
+                       "200\nhttps://api.osv.dev/v1/querybatch\n7",
+                       "000\nhttps://api.osv.dev/v1/querybatch\n7"):
+            for body in ("{}", '{"vulns": []}'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(data["class"], "injection_seen", (body, status))
+        r, data = self._live(None, status="000\nhttps://api.osv.dev/v1/query\n28", fixture="osv-mal.json")
+        self.assertNotEqual(data["class"], "malicious")
+
+    def test_check_failed_line_text_is_pinned(self):
+        with open(os.path.join(REPO, "skills", "kings-taster-check.md"), encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+        fetch = [l for l in lines if "Fetch (except the list file)" in l]
+        self.assertEqual(len(fetch), 1)
+        self.assertIn("`extract-osv` also checks that exit code in the status file. "
+                      "The GitHub, RDAP and Safe Browsing extractors don't, so they rely on this fetch rule.",
+                      fetch[0])
+        lst = [l for l in lines if "List file (only allowed redirect)" in l]
+        self.assertEqual(len(lst), 1)
+        for needle in ("mktemp", "$RAW", "$CODE", "removed after use", "including on failure", '> "$CODE"'):
+            self.assertIn(needle, lst[0], needle)
 
     def test_popular_malicious_is_pending_review(self):
         r, data = _extract("osv", "osv-popular-mal.json", OSV_STATUS_OK)
