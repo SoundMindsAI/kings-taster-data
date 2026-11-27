@@ -6,7 +6,7 @@ Never say "safe". Never print or summarize a key. Never read a raw response or R
 
 ## Goal
 
-Write one Python 3 file, `~/.kings-taster/checker.py`, using only the standard library. Don't install packages, use third-party packages, or download or run any SoundMinds code, except the official list verifier already in this repo: `scripts/verify.sh` or `python3 -E -s -m kt.verify`. That is the same command as `kings-taster-check`, and it is not code downloaded at check time. You write the file yourself from this build spec and the reference snippets below. The checker is optional: it is offered at first run and is never on by default.
+Write one Python 3 file, `~/.kings-taster/checker.py`, using only the standard library. Don't install packages, use third-party packages, or download or run any SoundMinds code, except the official list verifier already in this repo: `scripts/verify.sh` or `python3 -E -s -m kt.verify`. It's the same command `kings-taster-check` runs, and it isn't downloaded at check time. You write the file yourself from this build spec and the reference snippets below. The checker is optional: it is offered at first run and is never on by default.
 
 ## Command line
 
@@ -19,7 +19,7 @@ A verdict exits 0. A usage error or crash exits non-zero, and you then use check
 
 NAME, VERSION, OWNER/REPO and URL come from untrusted text. Never put them into a shell string. Launch the checker as an argv list with no shell, passing each value as one element such as `--name=VALUE`. If a shell is unavoidable, single-quote every value after `--`. Validate first; a value that fails is Unknown (`injection_seen`):
 
-- NAME must match `^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$` and VER must match `^[A-Za-z0-9._+-]{1,64}$`, the same patterns as `extract-osv` in `kings-taster-check`. NAME must also pass `kt.common.valid_package_name` for the ecosystem (npm, or PEP 508 for PyPI).
+- NAME must match `^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$` and VER must match `^[A-Za-z0-9._+-]{1,64}$`, the same patterns as `extract-osv` in `kings-taster-check`. NAME must also pass the same rule as `kt.common.valid_package_name` for the ecosystem (npm, or PEP 508 for PyPI).
 - OWNER and REPO must each match `^[A-Za-z0-9._-]{1,100}$`, the `extract-github` pattern.
 - A URL must start with `http://` or `https://`, contain no quote or control character, and be accepted by `canonicalize_url`. If `canonicalize_url` refuses, the check is Unknown (`injection_seen`).
 
@@ -31,7 +31,7 @@ Write a finding record as JSON under `~/.kings-taster/findings/` with every fiel
 
 ## Hosts and requests
 
-The checker is one standard-library-only Python file. Its HTTPS client must use a no-redirect opener (for example `urllib` with a handler that refuses redirects, since `urllib` follows redirects by default) and a host-allowlist check before every request; or it may run `curl` as an argv list with no shell. Allowed hosts: `api.osv.dev`, `api.github.com`, `github.com` (only `/SoundMindsAI/kings-taster-data/releases/download/…`), `release-assets.githubusercontent.com` (only the one list-file redirect), `data.iana.org` and the RDAP hosts it lists, and `safebrowsing.googleapis.com`. HTTPS only. With curl, run `curl --proto =https --max-redirs 0`; do not use `-L`. For the list-file download only, allow exactly one redirect (`curl --proto =https --max-redirs 1 -L`, or one hop in the opener), and require the effective host to be `github.com` or `release-assets.githubusercontent.com`. Any other host, scheme, or redirect is `injection_seen` (Unknown). Never contact the item's own URL.
+The checker is one standard-library-only Python file. Its HTTPS client must refuse redirects and check the host allowlist before every request. `urllib` follows redirects by default, so add a handler that refuses them. Or run `curl` as an argv list with no shell. Allowed hosts: `api.osv.dev`, `api.github.com`, `github.com` (only `/SoundMindsAI/kings-taster-data/releases/download/…`), `release-assets.githubusercontent.com` (only the one list-file redirect), `data.iana.org` and the RDAP hosts it lists, and `safebrowsing.googleapis.com`. HTTPS only. With curl, run `curl --proto =https --max-redirs 0`; do not use `-L`. For the list-file download only, allow exactly one redirect (`curl --proto =https --max-redirs 1 -L`, or one hop in the opener), and require the effective host to be `github.com` or `release-assets.githubusercontent.com`. Any other host, scheme, or redirect is `injection_seen` (Unknown). Never contact the item's own URL.
 
 ## Extraction
 
@@ -51,13 +51,13 @@ Precedence: Block, then Unknown, then Caution, then No known reports. Every requ
 - Live OSV is `POST https://api.osv.dev/v1/query` only. Never use querybatch. Require HTTP 200 and the exact effective URL `https://api.osv.dev/v1/query`, read from the status file written by `curl -w '%{http_code}\n%{url_effective}'`. Accept `{}` as zero vulns (clean) only when that status and URL are confirmed. A missing, unreadable or unconfirmed status file, a non-200, or a wrong URL (including `/v1/querybatch`) is `injection_seen`.
 - Follow OSV's `next_page_token` to the last page, on that same endpoint. A token must match `^[A-Za-z0-9_-]{1,256}$` and you follow at most 20 pages. A bad token, going past 20 pages, or a page with a token you don't follow means that source has failed. Never treat a partial page set as clean.
 - Record `http_status` and `response_sha256` on every `checked_against` entry (SPEC.md §4).
-- Link: from the canonical `http://` or `https://` URL, match `url-sha256:`, the `domain:` key (IDNA, as `match_key` does) and, when the host is an IP address, the `ip:` key, all against the verified list. Also run the lookalike-name check; a lookalike is Caution (`lookalike`). `kings-taster-check` states no lookalike rule, so add none of your own.
+- Link: from the canonical `http://` or `https://` URL, match `url-sha256:`, the `domain:` key (IDNA, as `match_key` does) and, when the host is an IP address, the `ip:` key, all against the verified list. SPEC.md §3.3 also requires a lookalike-name check (Caution `lookalike`). `kings-taster-check` does not yet state that rule, so this skill adds none of its own.
 - If `~/.kings-taster/health.json` is failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
 - Never reuse Block or Unknown. Never cache a link.
 
 ## Canaries
 
-Each OSV request is one `/v1/query` call, made one at a time: the item, then the fixed known-vulnerable canary package for the item's ecosystem. The list file has a fake entry per type. Safe Browsing includes Google's test URL if set up. RDAP runs once with a fixed known domain. A missing canary is Unknown (`check_failed`). A canary passes only when `canary_ok` is exactly True; a missing result is not a pass.
+Make OSV calls to `/v1/query` one at a time: first the item, then the fixed known-vulnerable canary package for the item's ecosystem. The list file has a fake entry per type. Safe Browsing includes Google's test URL if set up. RDAP runs once with a fixed known domain. A missing canary is Unknown (`check_failed`). A canary passes only when `canary_ok` is exactly True; a missing result is not a pass.
 
 ## Signature check
 
@@ -65,9 +65,9 @@ Verify the signed list with the existing verifier, exactly as `kings-taster-chec
 
 ## URLs and keys
 
-Match every URL by `match_key` of its canonical URL, plus its domain and IP keys. `canonicalize_url` implements Google's Safe Browsing URL canonicalization, and every vector in `canonicalization_vectors` must pass. The signed release file is `conformance.json`; `conformance/cases.json` is the in-repo development copy of the cases. Before canonicalizing, `canonicalize_url` refuses (raises) any link that is not `http://` or `https://`, or that has a backslash, an encoded `%5c`, a space or control character, or an empty host in the authority. Never map a refused link to a best-guess host. If `canonicalize_url` refuses, the check is Unknown (`injection_seen`). `match_key` must agree with SPEC.md §6.2: npm lowercased, PyPI PEP 503, domains IDNA and lowercase, `url-sha256:` plus the SHA-256 of the canonical URL bytes, and typed prefixes `npm:`, `pypi:`, `cve:`, `domain:`, `ip:`, `hash:`, `github:`, `url-sha256:`.
+Match every URL by `match_key` of its canonical URL, plus its domain and IP keys. `canonicalize_url` implements Google's Safe Browsing URL canonicalization, and every vector in `canonicalization_vectors` must pass. The signed release file is `conformance.json`; `conformance/cases.json` is the in-repo development copy of the cases. Before canonicalizing, `canonicalize_url` refuses (raises) any link that is not `http://` or `https://`, or that has a backslash, an encoded `%5c`, a space or control character, or an empty host in the authority. A live (`strict`) link is also refused if the authority contains `%`, if the host has any byte at or above 0x80 (never convert an IDN host to Punycode), if the host has `[` or `]`, or if it looks numeric but is not a valid IPv4 address. Never map a refused link to a best-guess host. If `canonicalize_url` refuses, the check is Unknown (`injection_seen`). `match_key` must agree with SPEC.md §6.2: npm lowercased, PyPI PEP 503, domains IDNA and lowercase, `url-sha256:` plus the SHA-256 of the canonical URL bytes, and typed prefixes `npm:`, `pypi:`, `cve:`, `domain:`, `ip:`, `hash:`, `github:`, `url-sha256:`.
 
-Read keys only from `~/.kings-taster/keys.env` (`chmod 600`) as environment variables. Never print or summarize a key.
+Read keys only from `~/.kings-taster/keys.env` (`chmod 600`) as environment variables. Never print or summarize a key. Send a Safe Browsing key in the `x-goog-api-key` header, never in the URL, and never print, log or echo it.
 
 ## Build steps
 
@@ -122,6 +122,8 @@ def canonicalize_url(url, strict=True):
     rawauth = re.split(rb"[/?]", rawauth, maxsplit=1)[0]
     if re.search(rb"(?i)%(2f|3f|40|5c)", rawauth) or b"\\" in rawauth:
         raise ValueError("encoded or backslash delimiter in authority")
+    if strict and b"%" in rawauth:
+        raise ValueError("percent sign in authority")
     if not m0 and re.search(rb":(?![0-9]+$)", rawauth.rsplit(b"@", 1)[-1]):
         raise ValueError("not http or https")
     hexd = b"0123456789abcdefABCDEF"
@@ -154,10 +156,15 @@ def canonicalize_url(url, strict=True):
     host = re.sub(rb":[0-9]*$", b"", host)
     host = re.sub(rb"\.+", b".", host).strip(b".")
     host = bytes(c + 32 if 65 <= c <= 90 else c for c in host)
-    if not host or b":" in host or (strict and any(c <= 32 or c == 127 for c in host)):
-        raise ValueError("empty host, or space or control character in host")
+    if not host or b":" in host or (strict and any(c <= 32 or c == 127 or c >= 128 for c in host)):
+        raise ValueError("empty host, or space, control or non-ASCII character in host")
+    if strict and (b"[" in host or b"]" in host):
+        raise ValueError("bracket in host")
     parts = host.split(b".")
-    if 1 <= len(parts) <= 4 and all(re.match(rb"^(0[xX][0-9a-fA-F]*|[0-9]+)$", p) for p in parts):
+    numeric = all(re.match(rb"^(0[xX][0-9a-fA-F]*|[0-9]+)$", p) for p in parts)
+    if strict and numeric and len(parts) > 4:
+        raise ValueError("numeric host is not IPv4")
+    if 1 <= len(parts) <= 4 and numeric:
         try:
             nums = [int(p, 16) if p[:2] in (b"0x", b"0X") else int(p, 8 if p[:1] == b"0" and len(p) > 1 else 10) for p in parts]
             val = 0
@@ -170,7 +177,8 @@ def canonicalize_url(url, strict=True):
             val = val * 256 ** (5 - len(nums)) + nums[-1]
             host = b".".join(str((val >> s) & 255).encode() for s in (24, 16, 8, 0))
         except ValueError:
-            pass
+            if strict:
+                raise ValueError("numeric host is not IPv4")
     segs = []
     for seg in path.split(b"/")[1:]:
         if seg == b"..":

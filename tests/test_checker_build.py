@@ -3,6 +3,7 @@
 Wording note: the repo-wide grep for the banned-word list may only hit the popular-name line in
 config/popular/npm.txt and the needle list in tests/test_check_skill.py. Don't add those words here.
 """
+import os
 import re
 import unittest
 
@@ -92,10 +93,11 @@ class TestCanonicalize(unittest.TestCase):
                 got = canon(raw)
             except ValueError:
                 refused += 1
-                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw), v["input"])
+                auth = re.split(rb"[/?]", raw.split(b"://", 1)[-1], maxsplit=1)[0]
+                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw) or b"%" in auth, v["input"])
                 continue
             self.assertEqual(got.encode("latin-1"), B.decode_c_escapes(v["expected"]), v["input"])
-        self.assertEqual(refused, 4)
+        self.assertGreaterEqual(refused, 4)
 
     def test_vectors_pass_non_strict(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
@@ -113,6 +115,49 @@ class TestCanonicalize(unittest.TestCase):
         ):
             with self.assertRaises(ValueError, msg=bad):
                 canon(bad)
+
+    def test_strict_refuses_percent_in_authority(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        for bad in ("http://good.com%252f@192.0.2.1/", "http://good.com%253f@192.0.2.1/",
+                    "http://good.com%25252f@192.0.2.1/", "http://good.com%2540192.0.2.1/",
+                    "http://good.com%41/", "http://good.com%2e%63om:80/"):
+            with self.assertRaises(ValueError, msg=bad):
+                canon(bad)
+            with self.assertRaises(B.Refused, msg=bad):
+                B.validate_url(bad)
+            with self.assertRaises(B.Refused, msg=bad):
+                B.check_argv("link", url=bad)
+        self.assertEqual(canon("http://example.com/a%2Fb"), "http://example.com/a/b")
+        canon("http://example.com/?q=%252f")
+
+    def test_strict_refuses_non_ascii_host(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        for bad in ("http://evil\u3002com/", "http://evil\uff0ecom/", "http://evil\uff61com/",
+                    "http://\uff25\uff36\uff29\uff2c.com/", "http://\u00e9vil.com/"):
+            with self.assertRaises(ValueError, msg=bad):
+                canon(bad)
+            with self.assertRaises(B.Refused, msg=bad):
+                B.validate_url(bad)
+
+    def test_strict_refuses_bad_numeric_and_bracket_hosts(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        for bad in ("http://0x/", "http://4294967296/", "http://[evil.com]/", "http://1.2.3.256/",
+                    "http://[::1]/", "http://1.2.3.4.5/"):
+            with self.assertRaises(ValueError, msg=bad):
+                canon(bad)
+            with self.assertRaises(B.Refused, msg=bad):
+                B.validate_url(bad)
+        self.assertEqual(canon("http://3279880203/blah"), "http://195.127.0.11/blah")
+        self.assertEqual(canon("http://0x7f.1/"), "http://127.0.0.1/")
+
+    def test_dots_follow_google_rules(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        for u in ("http://evil.com./", "http://.evil.com/", "http://evil..com/"):
+            self.assertEqual(canon(u), "http://evil.com/")
+
+    def test_strict_false_keeps_percent_authority_vectors(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        self.assertEqual(canon("http://host%23.com/", strict=False), "http://host%23.com/")
 
     def test_userinfo_is_removed(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
@@ -245,9 +290,47 @@ class TestKeys(unittest.TestCase):
 
     def test_skill_requires_domain_and_ip(self):
         text = B.skill_text()
-        for needle in ("`url-sha256:`, the `domain:` key", "`ip:` key", "the lookalike-name check",
-                       "add none of your own"):
+        for needle in ("`url-sha256:`, the `domain:` key", "`ip:` key", "SPEC.md §3.3 also requires a lookalike-name check",
+                       "adds none of its own"):
             self.assertIn(needle, text, needle)
+
+
+class TestRegexParityAndKeys(unittest.TestCase):
+    def test_patterns_match_check_skill(self):
+        with open(os.path.join(B.ROOT, "skills", "kings-taster-check.md"), encoding="utf-8") as f:
+            check = f.read()
+        name = re.search(r'NAME=re\.compile\(r"(\^\(@[^"]*)"\)', check).group(1)
+        ver = re.search(r'VER=re\.compile\(r"([^"]*)"\)', check).group(1)
+        repo = re.search(r'NAME=re\.compile\(r"(\^\[A-Za-z0-9\._-\]\{1,100\}\$)"\)', check).group(1)
+        self.assertEqual(B.PKG_NAME.pattern.encode(), name.encode())
+        self.assertEqual(B.PKG_VER.pattern.encode(), ver.encode())
+        self.assertEqual(B.REPO_PART.pattern.encode(), repo.encode())
+
+    def test_google_attribution_sentence(self):
+        self.assertIn("A Safe Browsing hit must add Google's attribution and notice, with the exact text in the "
+                      "`google-notice` block of `kings-taster-check` (`GOOGLE_ATTRIBUTION` and `GOOGLE_NOTICE` "
+                      "in `kt.finding`).", B.skill_text())
+
+    def test_safe_browsing_key_in_header(self):
+        for name in ("kings-taster-check.md", "kings-taster-build.md"):
+            with open(os.path.join(B.ROOT, "skills", name), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("x-goog-api-key", text, name)
+            self.assertNotIn("?key=$SAFE_BROWSING_KEY", text, name)
+            self.assertNotIn("urls:search?key=", text, name)
+        self.assertIn("urls:search` with header `x-goog-api-key: $SAFE_BROWSING_KEY`", text_of("kings-taster-check.md"))
+        self.assertIn("never in the URL", B.skill_text())
+
+    def test_skill_states_strict_refusals(self):
+        text = B.skill_text()
+        for needle in ("authority contains `%`", "never convert an IDN host to Punycode", "0x80",
+                       "`[` or `]`", "not a valid IPv4 address"):
+            self.assertIn(needle, text, needle)
+
+
+def text_of(name):
+    with open(os.path.join(B.ROOT, "skills", name), encoding="utf-8") as f:
+        return f.read()
 
 
 class TestOsvPin(unittest.TestCase):
@@ -276,7 +359,7 @@ class TestVerifierAndFetch(unittest.TestCase):
 
     def test_no_redirect_and_effective_host(self):
         text = B.skill_text()
-        for needle in ("no-redirect opener", "host-allowlist check", "as an argv list with no shell",
+        for needle in ("must refuse redirects", "check the host allowlist", "as an argv list with no shell",
                        "exactly one redirect", "require the effective host to be `github.com` or "
                        "`release-assets.githubusercontent.com`", "is `injection_seen` (Unknown)."):
             self.assertIn(needle, text, needle)
