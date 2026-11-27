@@ -4,8 +4,11 @@ The bot follows skills/kings-taster-first-run.md. This module sequences those st
 for tests. It never contacts X: a poster, if provided, must be a dry-run double
 passed in by the caller.
 """
+import fcntl
 import json
 import os
+import tempfile
+import threading
 
 from . import connectivity as CONN
 from . import routing as R
@@ -76,21 +79,165 @@ class DryRunPoster:
         return {"ok": True, "message": CONN.READ_ONLY_OK}
 
 
+def valid_limits(limits):
+    """True if limits has usable non-negative report caps. Missing or corrupt is False."""
+    if not isinstance(limits, dict):
+        return False
+    try:
+        day, week, per_item = report_caps(limits)
+    except (TypeError, KeyError, ValueError):
+        return False
+    return all(isinstance(n, int) and not isinstance(n, bool) and n >= 0
+               for n in (day, week, per_item))
+
+
+def _empty_used():
+    return {"day": 0, "week": 0, "items": {}}
+
+
+def _copy_used(used):
+    out = _empty_used()
+    if not used:
+        return out
+    out["day"] = used.get("day", 0)
+    out["week"] = used.get("week", 0)
+    out["items"] = dict(used.get("items") or {})
+    return out
+
+
+def _valid_usage(used):
+    if not isinstance(used, dict):
+        return False
+    for key in ("day", "week"):
+        if key in used:
+            n = used[key]
+            if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+                return False
+    items = used.get("items", {})
+    if items is None:
+        items = {}
+    if not isinstance(items, dict):
+        return False
+    for v in items.values():
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            return False
+    return True
+
+
+def usage_from_state(state):
+    """Return persisted usage, or None if the file has no usage fields yet."""
+    if not state:
+        return None
+    if not any(k in state for k in ("day", "week", "items")):
+        return None
+    used = {
+        "day": state.get("day", 0),
+        "week": state.get("week", 0),
+        "items": dict(state.get("items") or {}),
+    }
+    if not _valid_usage(used):
+        raise ValueError("state.json usage is corrupt")
+    return used
+
+
+def merge_used(caller, persisted):
+    """Take the higher count in each field so a stale caller cannot lower caps."""
+    a = _copy_used(caller)
+    if not persisted:
+        return a
+    b = _copy_used(persisted)
+    items = set(a["items"]) | set(b["items"])
+    return {
+        "day": max(a["day"], b["day"]),
+        "week": max(a["week"], b["week"]),
+        "items": {k: max(a["items"].get(k, 0), b["items"].get(k, 0)) for k in items},
+    }
+
+
+def reserve_report(used, limits, *, item=CONNECTIVITY_ITEM):
+    """Increment usage in place if a slot remains. Return True if reserved."""
+    if not valid_limits(limits):
+        return False
+    if reports_left(used, limits, item=item) < 1:
+        return False
+    used["day"] = used.get("day", 0) + 1
+    used["week"] = used.get("week", 0) + 1
+    used.setdefault("items", {})
+    used["items"][item] = used["items"].get(item, 0) + 1
+    return True
+
+
 def load_state(path):
+    """Load and validate state.json. Missing is {}. Corrupt raises before any post."""
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as f:
         doc = json.load(f)
     if not isinstance(doc, dict):
         raise ValueError("state.json must be an object")
+    usage_from_state(doc)  # raises if usage fields are present but corrupt
+    if STATE_KEY in doc and doc[STATE_KEY] not in (True, False):
+        raise ValueError("state.json connectivity_done is corrupt")
     return doc
 
 
 def save_state(path, doc):
+    """Write state.json via a temp file and rename so a crash cannot leave a half-write."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(doc, f, indent=2, sort_keys=True)
-        f.write("\n")
+    fd, tmp = tempfile.mkstemp(prefix=".state.", suffix=".tmp", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, sort_keys=True)
+            f.write("\n")
+            f.flush()
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _state_lock(path):
+    """Exclusive lock on path.lock, held for the reservation/write."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    lock_path = path + ".lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+
+    class _Lock:
+        def __enter__(self):
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    return _Lock()
+
+
+_USED_GUARDS = {}
+_USED_GUARDS_LOCK = threading.Lock()
+
+
+def _used_lock(used):
+    """In-process lock so two threads sharing the same used dict serialize reservations."""
+    key = id(used)
+    with _USED_GUARDS_LOCK:
+        lock = _USED_GUARDS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _USED_GUARDS[key] = lock
+        return lock
+
+
+class _null_lock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
@@ -103,17 +250,105 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
     must not pass a live posting client. If poster is omitted, nothing is posted
     and a failed post is treated as the read-only fallback when the flow would
     have posted.
+
+    `running_version` must be an ASCII x.y.z string (from the verified package or
+    release, not free text). The already_done flag can only add to a persisted
+    connectivity_done value, never clear it. Caps fail closed: missing or
+    corrupt limits, or a missing state path when usage cannot be reserved
+    safely, means no post (a private read-only check may still run). State is
+    loaded and validated before any post. Usage is reserved atomically (lock
+    file and temp+rename, or an in-process lock on a shared used dict) at the
+    yes, before the post, so two concurrent yeses get at most one post.
     """
-    used = used or {"day": 0, "week": 0, "items": {}}
-    left = 1
-    if limits is not None:
-        left = reports_left(used, limits)
+    # Refuse a bad version before any post or state write.
+    if not CONN.SEMVER.match(running_version if isinstance(running_version, str) else ""):
+        raise ValueError("running version is not x.y.z")
+
+    # Load and validate state BEFORE any post. A corrupt file raises.
+    if state_path:
+        load_state(state_path)
+
+    caller_used = used if used is not None else _empty_used()
+    if not _valid_usage(caller_used):
+        raise ValueError("usage counts are corrupt")
+    # Keep a reference so a shared used dict is updated in place under the cap lock.
+    if used is None:
+        used = caller_used
+
     shown = {"plain_statement": PLAIN_STATEMENT, "routing_ask": R.ASK}
     routing_doc, actions, just_this = R.apply_choice(
         routing_choice, chief_name=chief_name, ticked=ticked, delivery=delivery)
     shown["routing"] = {"doc": routing_doc, "actions": actions, "just_this_bot": just_this}
-    flow = CONN.flow(trigger, already_done, offer_answer, send_answer,
+
+    # Limits missing or corrupt: no post (private check only).
+    caps_ok = valid_limits(limits)
+    reserved = False
+    effective_done = bool(already_done)
+    used_now = _copy_used(caller_used)
+
+    file_lock = _state_lock(state_path) if state_path else _null_lock()
+    mem_lock = _used_lock(used)
+    with file_lock, mem_lock:
+        state = load_state(state_path) if state_path else {}
+        # Flag can only add, never clear a persisted connectivity_done.
+        effective_done = bool(already_done) or bool(state.get(STATE_KEY))
+        persisted = usage_from_state(state)
+        used_now = merge_used(used, persisted)
+        used["day"] = used_now["day"]
+        used["week"] = used_now["week"]
+        used["items"] = dict(used_now["items"])
+
+        would_count = (
+            trigger in ("first_run", "user_request")
+            and not (trigger == "first_run" and effective_done)
+            and offer_answer == "yes" and send_answer == "yes"
+            and caps_ok
+        )
+        if would_count:
+            reserved = reserve_report(used, limits)
+            used_now = _copy_used(used)
+            if reserved and state_path:
+                state[STATE_KEY] = True if trigger == "first_run" else state.get(STATE_KEY, False)
+                state["day"] = used_now["day"]
+                state["week"] = used_now["week"]
+                state["items"] = dict(used_now["items"])
+                save_state(state_path, state)
+        elif state_path and trigger == "first_run" and not effective_done and trigger in ("first_run", "user_request"):
+            # First-run attempt (including a decline) is marked done, with no extra report count.
+            # Only mark when this is a real first_run that will offer.
+            pass
+
+        left = 0
+        if caps_ok:
+            # If we reserved, a slot was taken; flow still sees a remaining slot of 1
+            # for this yes. If we did not reserve, either we are over cap or this is
+            # not a counting yes: pass the current remaining count.
+            left = 1 if reserved else reports_left(used_now, limits)
+        # Persist connectivity_done for a first-run offer (including declines) before return.
+        will_offer = trigger in ("first_run", "user_request") and not (
+            trigger == "first_run" and effective_done)
+        if state_path and will_offer and trigger == "first_run":
+            state = load_state(state_path) if os.path.exists(state_path) else state
+            state[STATE_KEY] = True
+            if "day" not in state and persisted is None and not reserved:
+                # Keep decline-only state as done, without inventing usage if none exists.
+                pass
+            else:
+                state["day"] = used_now["day"]
+                state["week"] = used_now["week"]
+                state["items"] = dict(used_now["items"])
+            save_state(state_path, state)
+
+    flow = CONN.flow(trigger, effective_done, offer_answer, send_answer,
                      post_ok=post_ok, reports_left=left)
+    # If we reserved a cap slot, this yes counts even if the post later fails.
+    if reserved:
+        flow = dict(flow)
+        flow["counts_as_report"] = True
+        if not post_ok:
+            flow["posted"] = False
+            flow["read_only_check"] = True
+
     posted = None
     read_only = None
     live_link = None
@@ -127,11 +362,10 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
             flow = dict(flow)
             flow["posted"] = False
             flow["read_only_check"] = True
-            flow["counts_as_report"] = False
+            # A reserved slot already counted; keep counts_as_report.
             shown["pre_send"] = "refused"
         elif flow["posted"]:
             if poster is None:
-                # No poster: do not post. Treat as a failed send, then read-only.
                 not_sent = "Not sent: no poster configured"
                 flow = dict(flow)
                 flow["posted"] = False
@@ -153,16 +387,7 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
             read_only = {"ok": False, "message": "read-only check skipped (no poster)"}
         else:
             read_only = poster.read_thread()
-    if flow["marks_done"] and state_path:
-        state = load_state(state_path)
-        state[STATE_KEY] = True
-        save_state(state_path, state)
-    used_after = dict(used)
-    used_after["items"] = dict(used.get("items") or {})
-    if flow["counts_as_report"]:
-        used_after["day"] = used.get("day", 0) + 1
-        used_after["week"] = used.get("week", 0) + 1
-        used_after["items"][CONNECTIVITY_ITEM] = used_after["items"].get(CONNECTIVITY_ITEM, 0) + 1
+
     return {
         "shown": shown,
         "routing": routing_doc,
@@ -174,5 +399,5 @@ def run(trigger, *, already_done=False, offer_answer="none", send_answer="none",
         "read_only": read_only,
         "counts_as_report": flow["counts_as_report"],
         "counts_as_threat_report": False,
-        "used": used_after,
+        "used": _copy_used(used_now if reserved or used_now else used),
     }

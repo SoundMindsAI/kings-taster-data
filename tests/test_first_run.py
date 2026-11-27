@@ -3,6 +3,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import unittest
 
 from kt import connectivity as CONN
@@ -157,8 +158,9 @@ class TestWeeklyCheck(unittest.TestCase):
     def test_one_nudge_when_the_line_is_missing(self):
         r = R.weekly_check("Installer", line_present=False, can_read=True)
         self.assertFalse(r["silent"])
-        self.assertEqual(r["nudge"], "The King's Taster line is missing from Installer. Paste it again?")
-        self.assertIn(R.LINE, R.nudge_text("Installer"))
+        self.assertTrue(r["nudge"].startswith("The King's Taster line is missing from Installer. Paste it again?"))
+        self.assertIn(R.LINE, r["nudge"])
+        self.assertEqual(r["nudge"], R.nudge_text("Installer"))
         self.assertFalse(r["readd"])
         again = R.weekly_check("Installer", line_present=False, can_read=True,
                                already_nudged_this_week=True)
@@ -236,8 +238,10 @@ class TestFirstRunFlow(unittest.TestCase):
         self.assertFalse(out["counts_as_report"])
 
         poster = F.DryRunPoster(post_ok=False)
+        # Fresh state: a prior decline on this install already marks first-run done.
+        failed_state = _state(self.tmp + "-failed")
         out = F.run("first_run", offer_answer="yes", send_answer="yes",
-                    post_ok=False, poster=poster, state_path=self.state, limits=self.limits)
+                    post_ok=False, poster=poster, state_path=failed_state, limits=self.limits)
         self.assertIsNone(out["posted"])
         self.assertTrue(out["not_sent"].startswith("Not sent:"))
         self.assertTrue(out["flow"]["read_only_check"])
@@ -257,6 +261,11 @@ class TestFirstRunFlow(unittest.TestCase):
                       poster=poster, state_path=self.state, limits=self.limits)
         self.assertFalse(again["flow"]["offered"])
         self.assertIsNone(again["posted"])
+        # The persisted flag is enough; the caller flag cannot clear it.
+        again_default = F.run("first_run", offer_answer="yes", send_answer="yes",
+                              poster=F.DryRunPoster(), state_path=self.state, limits=self.limits)
+        self.assertFalse(again_default["flow"]["offered"])
+        self.assertIsNone(again_default["posted"])
         # The user may ask later.
         later = F.run("user_request", already_done=True, offer_answer="yes", send_answer="yes",
                       poster=F.DryRunPoster(), limits=self.limits)
@@ -292,3 +301,133 @@ class TestFirstRunFlow(unittest.TestCase):
             self.assertNotIn("from tweepy", src, mod.__name__)
             self.assertNotIn("create_posts(", src, mod.__name__)
         self.assertTrue(hasattr(F, "DryRunPoster"))
+
+
+class TestStateAndCapsFailClosed(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.state = _state(self.tmp)
+        self.limits = _limits()
+
+    def test_second_first_run_reads_connectivity_done_from_state(self):
+        poster = F.DryRunPoster()
+        first = F.run("first_run", offer_answer="yes", send_answer="yes",
+                      poster=poster, state_path=self.state, limits=self.limits,
+                      running_version="1.2.3")
+        self.assertEqual(first["posted"], "KT 1.2.3 is live and checking")
+        self.assertTrue(load(self.state)[CONN.STATE_KEY])
+        poster2 = F.DryRunPoster()
+        again = F.run("first_run", offer_answer="yes", send_answer="yes",
+                      poster=poster2, state_path=self.state, limits=self.limits,
+                      running_version="1.2.3")
+        self.assertIsNone(again["posted"])
+        self.assertEqual(poster2.posts, [])
+        self.assertFalse(again["flow"]["offered"])
+
+    def test_already_done_flag_cannot_clear_persisted_done(self):
+        F.run("first_run", offer_answer="no", poster=F.DryRunPoster(),
+              state_path=self.state, limits=self.limits)
+        poster = F.DryRunPoster()
+        out = F.run("first_run", already_done=False, offer_answer="yes", send_answer="yes",
+                    poster=poster, state_path=self.state, limits=self.limits)
+        self.assertIsNone(out["posted"])
+        self.assertEqual(poster.posts, [])
+        self.assertFalse(out["flow"]["offered"])
+
+    def test_used_is_persisted_in_state(self):
+        poster = F.DryRunPoster()
+        out = F.run("first_run", offer_answer="yes", send_answer="yes",
+                    poster=poster, state_path=self.state, limits=self.limits)
+        self.assertTrue(out["counts_as_report"])
+        state = load(self.state)
+        self.assertIn("day", state)
+        self.assertGreaterEqual(state.get("day", 0), 1)
+        self.assertGreaterEqual(state.get("items", {}).get("connectivity", 0), 1)
+        # A new process that only sees the state file is still over the per-item cap.
+        poster2 = F.DryRunPoster()
+        again = F.run("user_request", offer_answer="yes", send_answer="yes",
+                      poster=poster2, state_path=self.state, limits=self.limits)
+        self.assertIsNone(again["posted"])
+        self.assertEqual(poster2.posts, [])
+
+    def test_limits_omitted_or_corrupt_does_not_post(self):
+        used = {"day": 99, "week": 99, "items": {"connectivity": 99}}
+        for bad in (None, {}, {"reports_per_install": {}}, "nope"):
+            poster = F.DryRunPoster()
+            out = F.run("first_run", offer_answer="yes", send_answer="yes",
+                        poster=poster, used=dict(used), limits=bad, state_path=_state(self.tmp + "-x"))
+            self.assertIsNone(out["posted"], bad)
+            self.assertEqual(poster.posts, [], bad)
+
+    def test_corrupt_state_is_refused_before_post(self):
+        with open(self.state, "w") as f:
+            f.write("{")
+        poster = F.DryRunPoster()
+        with self.assertRaises((ValueError, json.JSONDecodeError)):
+            F.run("first_run", offer_answer="yes", send_answer="yes",
+                  poster=poster, state_path=self.state, limits=self.limits)
+        self.assertEqual(poster.posts, [])
+
+    def test_corrupt_usage_in_state_is_refused_before_post(self):
+        with open(self.state, "w") as f:
+            f.write('{"connectivity_done": false, "day": "plenty"}\n')
+        poster = F.DryRunPoster()
+        with self.assertRaises(ValueError):
+            F.run("first_run", offer_answer="yes", send_answer="yes",
+                  poster=poster, state_path=self.state, limits=self.limits)
+        self.assertEqual(poster.posts, [])
+
+    def test_concurrent_yeses_post_at_most_once_with_shared_used(self):
+        used = {"day": 0, "week": 0, "items": {}}
+        results = []
+
+        def one():
+            poster = F.DryRunPoster()
+            out = F.run("first_run", offer_answer="yes", send_answer="yes",
+                        poster=poster, used=used, limits=self.limits)
+            results.append((out["posted"], len(poster.posts)))
+
+        t1 = threading.Thread(target=one)
+        t2 = threading.Thread(target=one)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+        posts = sum(1 for posted, n in results if posted is not None)
+        self.assertLessEqual(posts, 1, results)
+        self.assertEqual(used["items"].get("connectivity"), 1)
+
+    def test_concurrent_yeses_post_at_most_once_with_state_file(self):
+        results = []
+
+        def one():
+            poster = F.DryRunPoster()
+            out = F.run("first_run", offer_answer="yes", send_answer="yes",
+                        poster=poster, state_path=self.state, limits=self.limits)
+            results.append((out["posted"], len(poster.posts)))
+
+        t1 = threading.Thread(target=one)
+        t2 = threading.Thread(target=one)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+        posts = sum(1 for posted, n in results if posted is not None)
+        self.assertLessEqual(posts, 1, results)
+        state = load(self.state)
+        self.assertTrue(state[CONN.STATE_KEY])
+        self.assertEqual(state["items"]["connectivity"], 1)
+
+
+class TestVersionGate(unittest.TestCase):
+    def test_fullwidth_and_malformed_versions_refused_before_post(self):
+        poster = F.DryRunPoster()
+        for v in ("", "1", "1.0", "v1.0.0", "1.0.0-rc1", "1.0.0\n", " 1.0.0",
+                  "10.20.0.2", "9999.0.0", "１.０.０"):
+            with self.assertRaises(ValueError):
+                F.run("first_run", offer_answer="yes", send_answer="yes",
+                      running_version=v, poster=poster, limits=_limits())
+            self.assertEqual(poster.posts, [])
+            with self.assertRaises(ValueError):
+                CONN.draft(v)
+            self.assertFalse(CONN.draft_allowed("KT %s is live and checking" % v, v) if v else False)
+
+    def test_ascii_semver_is_accepted(self):
+        self.assertTrue(CONN.draft_allowed("KT 2.3.4 is live and checking", "2.3.4"))
+        self.assertFalse(CONN.draft_allowed("KT 2.3.4 is live and checking", "1.0.0"))

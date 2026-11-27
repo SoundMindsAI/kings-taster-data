@@ -183,7 +183,7 @@ def weekly_check(name, *, line_present, can_read=False, message_approved=False,
     if not line_present:
         out["silent"] = False
         if not already_nudged_this_week:
-            out["nudge"] = MISSING_NUDGE % name
+            out["nudge"] = nudge_text(name)
     if days_since_ask is not None and days_since_ask >= 30:
         # The 30-day note is added to that week's message (the nudge, or a
         # standalone note if the line is still in place).
