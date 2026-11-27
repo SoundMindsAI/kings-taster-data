@@ -52,6 +52,10 @@ def _item(spec):
     return item
 
 
+# curl status file for extract-osv: HTTP 200 and the exact query URL.
+OSV_STATUS_OK = os.path.join(FIX, "osv-status-ok.txt")
+
+
 def _extract_file(name, fixture, *args):
     r = C.run_extractor(name, os.path.join(FIX, fixture), *args)
     if r.returncode != 0:
@@ -135,7 +139,10 @@ def _build_source(name, token, item):
                 path = os.path.join(tmp, "raw.json")
                 with open(path, "w", encoding="utf-8") as fh:
                     json.dump(token["body"], fh)
-                r = C.run_extractor("osv", path)
+                code = os.path.join(tmp, "code.txt")
+                with open(code, "w", encoding="utf-8") as fh:
+                    fh.write("200\nhttps://api.osv.dev/v1/query")
+                r = C.run_extractor("osv", path, code)
             return _src(name, C.parse_extracted(r.stdout))
         if token.get("status") == "ok" and name == "rdap":
             if token.get("http_status") == 404:
@@ -150,13 +157,13 @@ def _build_source(name, token, item):
         raise unittest.SkipTest("setup %s=%r not expressible" % (name, token))
     if name == "osv":
         if token == "ok":
-            return _src(name, _extract_file("osv", "osv-clean.json"))
+            return _src(name, _extract_file("osv", "osv-clean.json", OSV_STATUS_OK))
         if token in ("ok_mal_hit", "ok_mal_hit_popular_name"):
-            return _src(name, _extract_file("osv", "osv-mal.json"))
+            return _src(name, _extract_file("osv", "osv-mal.json", OSV_STATUS_OK))
         if token == "ok_vulnerable_hit":
-            return _src(name, _extract_file("osv", "osv-vuln.json"))
+            return _src(name, _extract_file("osv", "osv-vuln.json", OSV_STATUS_OK))
         if token == "ok_but_canary_missing":
-            return _src(name, _extract_file("osv", "osv-clean.json"), canary_ok=False)
+            return _src(name, _extract_file("osv", "osv-clean.json", OSV_STATUS_OK), canary_ok=False)
     elif name == "github_api":
         if token == "ok":
             return _src(name, _extract_file("github", "github-repo.json"))
