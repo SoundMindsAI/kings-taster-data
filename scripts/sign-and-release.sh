@@ -151,7 +151,9 @@ OpenSSF Malicious Packages via OSV.dev (Apache-2.0; entries with GitHub malware 
 "No known reports" means nothing was found, not that something is safe.
 NOTES_EOF
 cp "$ROOT/sources/LICENSES.md" "$ART/LICENSES.md"
-cp "$ROOT/LICENSES/Apache-2.0.txt" "$ART/Apache-2.0.txt"
+TPL_DIR="$ROOT/third-party-licenses"
+OSSF_LICENSE="OpenSSF-Malicious-Packages-Apache-2.0.txt"
+cp "$TPL_DIR/$OSSF_LICENSE" "$ART/Apache-2.0.txt"
 assets=()
 for f in "${FILES[@]}"; do assets+=("$ART/$f" "$ART/$f.sig"); done
 "$GH" release create "$TAG" "${assets[@]}" "$ART/LICENSES.md" "$ART/Apache-2.0.txt" \

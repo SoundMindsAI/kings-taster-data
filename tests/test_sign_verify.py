@@ -181,7 +181,7 @@ class SignAndReleaseBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tmpdir(self)
         self.repo = os.path.join(self.tmp, "repo")
-        for d in ("kt", "schema", "config", "review", "conformance", "scripts", "sources", "LICENSES"):
+        for d in ("kt", "schema", "config", "review", "conformance", "scripts", "sources", "third-party-licenses"):
             shutil.copytree(os.path.join(REPO, d), os.path.join(self.repo, d),
                             ignore=shutil.ignore_patterns("__pycache__"))
         keys = os.path.join(self.tmp, "keys")
