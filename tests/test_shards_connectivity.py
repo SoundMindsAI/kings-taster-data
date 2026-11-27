@@ -144,6 +144,18 @@ class TestShardValidation(ShardCase):
         shutil.copy(os.path.join(self.out, "shard-kev.json"), os.path.join(self.out, "shard-npm-zz.json"))
         self.assertTrue(any("doesn't list" in e for e in self.errs()))
 
+    def test_unlisted_hidden_and_case_variant_shard_files_refused(self):
+        src = os.path.join(self.out, "shard-kev.json")
+        for name in (".shard-kev.json", "SHARD-kev.json", "Shard-kev.json", ".SHARD-npm-aa.json"):
+            shutil.copy(src, os.path.join(self.out, name))
+            self.assertTrue(any("doesn't list" in e for e in self.errs()), name)
+            os.remove(os.path.join(self.out, name))
+        for name in ("notes.txt", "shardlog.json", "not-shard-kev.json", "foo-shard-kev.json", "latest.json.bak"):
+            with open(os.path.join(self.out, name), "w") as f:
+                f.write("x")
+            self.assertFalse(any("doesn't list" in e for e in self.errs()), name)
+            os.remove(os.path.join(self.out, name))
+
     def test_entry_in_wrong_shard_refused(self):
         # Move one entry into another shard and re-pin both in the manifest: still refused.
         src = next(s for s in self.m["shards"] if s["group"] == "npm" and s["entries"])
@@ -266,3 +278,13 @@ class TestDocs(unittest.TestCase):
         with open(os.path.join(REPO, "SPEC.md"), encoding="utf-8") as f:
             spec = " ".join(f.read().split())
         self.assertIn("%d a day, %d a week, and %d per item per week" % (day, week, item), spec)
+
+
+class TestShardFilename(unittest.TestCase):
+    def test_hidden_and_case_variants(self):
+        for name in ("shard-kev.json", "shard-npm-00.json", ".shard-kev.json", "SHARD-kev.json",
+                     "Shard-npm-aa.json", ".SHARD-x", "shard-foo.txt"):
+            self.assertTrue(SH.looks_like_shard_filename(name), name)
+        for name in ("notes.txt", "shardlog.json", "not-shard-kev.json", "foo-shard-kev.json",
+                     "latest.json.bak", "README.md", ".", "..", "", ".gitignore"):
+            self.assertFalse(SH.looks_like_shard_filename(name), name)
