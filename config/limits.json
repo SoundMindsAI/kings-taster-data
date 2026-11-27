@@ -7,7 +7,5 @@
   "max_download_bytes": {"cisa-kev": 52428800, "osv-npm": 1073741824, "osv-pypi": 268435456},
   "max_zip_member_bytes": 1048576,
   "max_zip_total_uncompressed_bytes": 4294967296,
-  "max_versions_per_entry": 500,
-  "freshness_hours": 48,
-  "watchdog_hours": 26
+  "max_versions_per_entry": 500
 }
