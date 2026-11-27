@@ -54,7 +54,8 @@ def _item(spec):
 
 def _extract_file(name, fixture, *args):
     r = C.run_extractor(name, os.path.join(FIX, fixture), *args)
-    assert r.returncode == 0, r.stderr
+    if r.returncode != 0:
+        raise AssertionError(r.stderr)
     return C.parse_extracted(r.stdout)
 
 
@@ -68,7 +69,8 @@ def _list_hit(item, review_state):
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"entries": [entry]}, fh)
         r = C.run_extractor("list", path, key)
-    assert r.returncode == 0, r.stderr
+    if r.returncode != 0:
+        raise AssertionError(r.stderr)
     return C.parse_extracted(r.stdout)
 
 
@@ -103,7 +105,8 @@ def _canary_hit(entry):
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"entries": [shard]}, fh)
         r = C.run_extractor("list", path, entry["match_key"])
-    assert r.returncode == 0, r.stderr
+    if r.returncode != 0:
+        raise AssertionError(r.stderr)
     return C.parse_extracted(r.stdout)
 
 
@@ -199,7 +202,7 @@ def _run_case(case):
         if src is not None:
             src["source"] = name
             sources.append(src)
-    return C.decide(item, sources, now=NOW, finding_id=FID,
+    return C.decide(item, sources, now=NOW, template_version="1.0.0", finding_id=FID,
                     finding_path="~/.kings-taster/findings/%s.json" % FID)
 
 

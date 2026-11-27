@@ -81,7 +81,7 @@ Those pins are not published yet. Until they are, a release is still verified ag
   until a person reviews it. CI holds no signing key and no secrets.
 - The owner signs and publishes with `scripts/sign-and-release.sh`, which re-validates the artifact, checks it
   against the live release (newer `generated_at`, no dropped revocations), stops on the circuit breaker, and runs
-  the same health check on the unsigned files, which must be less than 26 hours old. It signs with
+  the same health check on the unsigned files, which must be no more than 26 hours old. It signs with
   `ssh-keygen -Y sign` only if that check passes or a person has accepted a hold, then verifies the signatures
   and creates the release. If the health check fails, or anything else unexpected happens, nothing is signed
   and nothing is published.

@@ -4,16 +4,15 @@ The bot itself follows the skill text in skills/kings-taster-check.md. This modu
 that skill, runs its extractors, and applies the fixed decision rules so tests can prove
 the skill and the rules agree. It never contacts the network.
 """
-import hashlib
 import os
-import posixpath
 import re
 import subprocess
 import sys
 import uuid
 
-from .common import normalize_package, parse_time
+from .common import normalize_package, parse_time, sha256_file
 from .finding import RESULT_RANK, validate_record, GOOGLE_ATTRIBUTION, GOOGLE_NOTICE
+from . import urlcheck as U
 from . import verify as KV
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -35,7 +34,7 @@ ALLOWED_HOSTS = frozenset({
     "safebrowsing.googleapis.com",
 })
 LIST_REDIRECT_HOSTS = frozenset({"github.com", "release-assets.githubusercontent.com"})
-LIST_PATH_PREFIX = "/SoundMindsAI/kings-taster-data/releases/download/"
+LIST_PATH_PREFIX = U.LIST_PATH_PREFIX
 BANNED = re.compile(r"\bsafe(ly|ty)?\b(?!\s+browsing)|guarantee", re.IGNORECASE)
 # The skill body may mention the ban itself; the Google notice is only in Commands.
 SAFE_EXCEPTIONS = ('Never say "safe"', "Safe Browsing")
@@ -129,99 +128,33 @@ def parse_extracted(stdout):
     return data
 
 
-def _unquote_path(value, times=4):
-    """Decode %XX sequences (any case) a few times, without a network library."""
-    out = value or ""
-    for _ in range(times):
-        nxt = re.sub(r"%([0-9A-Fa-f]{2})",
-                     lambda m: bytes.fromhex(m.group(1)).decode("latin-1"), out)
-        if nxt == out:
-            break
-        out = nxt
-    return out
-
-
-def _has_dotdot(value):
-    """True if value has a '..' path segment, including percent-encoded forms."""
-    raw = value or ""
-    lower = raw.lower()
-    if ".." in raw:
-        return True
-    if "%2e%2e" in lower or "%2e." in lower or ".%2e" in lower or "%252e" in lower:
-        return True
-    return False
-
-
 def _split_host_path(host, url_path):
     """Accept a bare host + path, or a full URL in either argument.
 
-    When url_path is a full URL, the hostname always comes from that URL.
-    A bare host that does not match it is treated as a mismatch (empty host).
+    Every argument goes through the shared parser, so a bad authority in any of
+    them (userinfo, port, backslash, ...) gives an empty host. When url_path is a
+    full URL, the hostname comes from that URL; a bare host or a second full URL
+    that names another host is a mismatch (empty host).
     """
     path = url_path or ""
     raw_host = host or ""
-    source = raw_host if ("://" in raw_host or raw_host.startswith("//")) else (
-        path if ("://" in path or path.startswith("//")) else None)
-    if source is not None:
-        rest = source.split("://", 1)[-1] if "://" in source else source[2:]
-        authority, _, remainder = rest.partition("/")
-        # Query or fragment in the authority is not a host (e.g.
-        # https://evil.example?x=@github.com/...). Refuse before the '@' split.
-        if "?" in authority or "#" in authority:
-            return "", "/"
-        if "@" in authority:
-            authority = authority.rsplit("@", 1)[1]
-        # Strip a port, but keep IPv6 in brackets out of scope (we only allow names).
-        if authority.startswith("["):
-            hostname = authority[1:].split("]", 1)[0]
-        else:
-            hostname = authority.split(":", 1)[0]
-        parsed_path = "/" + remainder if remainder or rest.endswith("/") or "/" in rest else "/"
-        parsed_path = parsed_path.split("?", 1)[0].split("#", 1)[0]
-        if "://" in raw_host or raw_host.startswith("//"):
-            return hostname, parsed_path
-        # url_path is a full URL: always use its hostname. A bare host
-        # argument that disagrees is a mismatch and is refused.
-        if raw_host:
-            given = raw_host.split("@", 1)[-1]
-            if given.startswith("["):
-                given = given[1:].split("]", 1)[0]
-            else:
-                given = given.split(":", 1)[0]
-            if given.lower() != hostname.lower():
-                return "", parsed_path
-        return hostname, parsed_path
-    return raw_host, path.split("?", 1)[0].split("#", 1)[0]
-
-
-def _list_download_path_ok(path):
-    """github.com is allowed only for /SoundMindsAI/kings-taster-data/releases/download/<tag>/<file>.
-
-    The prefix is matched on segment boundaries. Any '..' (raw or encoded, any case) is refused.
-    """
-    if not path or _has_dotdot(path):
-        return False
-    decoded = _unquote_path(path)
-    if _has_dotdot(decoded):
-        return False
-    if "\\" in decoded:
-        return False
-    if not decoded.startswith("/"):
-        decoded = "/" + decoded
-    normalized = posixpath.normpath(decoded)
-    if normalized != decoded.rstrip("/") and normalized + "/" != decoded:
-        # Collapse of '.' or '//' only is ok; a changed path after '..' was already refused.
-        if ".." in decoded.split("/") or ".." in normalized.split("/"):
-            return False
-    if not normalized.startswith(LIST_PATH_PREFIX):
-        return False
-    rest = normalized[len(LIST_PATH_PREFIX):]
-    parts = [p for p in rest.split("/") if p]
-    if len(parts) < 2:
-        return False
-    if any(p in (".", "..") for p in parts):
-        return False
-    return True
+    host_is_url = U.is_url(raw_host)
+    path_is_url = U.is_url(path)
+    try:
+        host_url = U.split_url(raw_host) if host_is_url else None
+        path_url = U.split_url(path) if path_is_url else None
+        bare = U.bare_host(raw_host) if raw_host and not host_is_url else None
+    except ValueError:
+        return "", "/"
+    if host_url is None and path_url is None:
+        return bare or "", path.split("?", 1)[0].split("#", 1)[0]
+    source = host_url or path_url
+    hostname, parsed_path = source[1], source[2]
+    if host_url and path_url and host_url[1] != path_url[1]:
+        return "", parsed_path
+    if bare is not None and bare != hostname:
+        return "", parsed_path
+    return hostname, parsed_path
 
 
 def host_allowed(host, url_path="", list_redirect=False):
@@ -231,7 +164,7 @@ def host_allowed(host, url_path="", list_redirect=False):
     if list_redirect:
         return host in LIST_REDIRECT_HOSTS
     if host == "github.com":
-        return _list_download_path_ok(url_path)
+        return U.list_path_ok(url_path)
     if host not in ALLOWED_HOSTS:
         return False
     if host == "release-assets.githubusercontent.com":
@@ -239,8 +172,16 @@ def host_allowed(host, url_path="", list_redirect=False):
     return True
 
 
-def _popular_names(root=None):
-    root = root or ROOT
+_POPULAR_DEFAULT = None
+
+
+def clear_popular_cache():
+    """Forget the cached default lists so the next call re-reads config/popular/."""
+    global _POPULAR_DEFAULT
+    _POPULAR_DEFAULT = None
+
+
+def _read_popular(root):
     names = set()
     for eco, fname in (("npm", "npm.txt"), ("PyPI", "pypi.txt")):
         path = os.path.join(root, "config", "popular", fname)
@@ -250,7 +191,17 @@ def _popular_names(root=None):
                 if not line or line.startswith("#"):
                     continue
                 names.add((eco, normalize_package(eco, line)))
-    return names
+    return frozenset(names)
+
+
+def _popular_names(root=None):
+    """Popular names for root. Only the default ROOT lists are cached; a custom root is re-read."""
+    global _POPULAR_DEFAULT
+    if root is not None:
+        return _read_popular(root)
+    if _POPULAR_DEFAULT is None:
+        _POPULAR_DEFAULT = _read_popular(ROOT)
+    return _POPULAR_DEFAULT
 
 
 def _canonical_ecosystem(ecosystem):
@@ -351,13 +302,15 @@ def _status_of(src):
     return src.get("status") or "ok"
 
 
-def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00Z",
-           template_version="1.0.0", finding_id=None, finding_path="~/.kings-taster/findings/example.json"):
-    """Apply the fixed checklist rules and return record, explanation, and at most 5 verdict lines."""
+def decide(item, sources, *, now, template_version, health=None, finding_id=None,
+           finding_path="~/.kings-taster/findings/example.json"):
+    """Apply the fixed checklist rules and return record, explanation, and at most 5 verdict lines.
+
+    now and template_version are required keyword-only arguments (a missing one is a TypeError).
+    """
     item_type = item["item_type"]
     indicator = item["indicator_defanged"]
-    # Always consult config/popular/; the popular= flag cannot bypass a listed name,
-    # and cannot hold an unlisted name at Caution.
+    # Always consult config/popular/; there is no way to bypass a listed name.
     popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
     if health and health.get("status") == "failing":
         reason = health.get("reason") or "failed"
@@ -380,7 +333,6 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
     matched = []
     fixed = None
     deciding = None  # (rank, source, date, snippet)
-    sb_ok = False
     no_link = False
 
     for src in sources:
@@ -432,11 +384,8 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
                 if popular:
                     reasons.append("pending_review")
                     matched.append(_match(hit["id"], url, "osv"))
-                    deciding = max(filter(None, [deciding, (RESULT_RANK["caution"], "osv", date,
-                        "Caution. Reported malicious by OSV, pending review, from OSV.dev (%s, %s)." % (url, date))]),
-                        default=None, key=lambda x: x[0]) if deciding else (
-                            RESULT_RANK["caution"], "osv", date,
-                            "Caution. Reported malicious by OSV, pending review, from OSV.dev (%s, %s)." % (url, date))
+                    deciding = _best(deciding, RESULT_RANK["caution"], "osv", date,
+                        "Caution. Reported malicious by OSV, pending review, from OSV.dev (%s, %s)." % (url, date))
                 else:
                     reasons.append("malicious_match")
                     matched.append(_match(hit["id"], url, "osv"))
@@ -507,7 +456,6 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
                 deciding = _best(deciding, RESULT_RANK["caution"], "rdap", date,
                     "Caution. No RDAP registration date was found, from RDAP (https://www.iana.org/help/licensing-terms, %s)." % date)
         elif name == "safe_browsing":
-            sb_ok = True
             if extracted.get("class") == "hit":
                 reasons.append("malicious_match")
                 url = "https://safebrowsing.google.com"
@@ -564,10 +512,6 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
             if s["status"] == "ok":
                 parts.append("%s (%s)" % (_source_display(s["source"]), _date10(s["source_date"])))
         explanation = "No known reports. Checked against %s on %s." % (", ".join(parts), _date10(now))
-
-    if sb_ok and GOOGLE_ATTRIBUTION not in explanation:
-        # only add when SB contributed a line; block path already adds it
-        pass
 
     rec = _record(item, checked, result, reasons, explanation, now, template_version, finding_id,
                   matched=matched, fixed=fixed)
@@ -664,11 +608,6 @@ def _verdict_lines(rec, deciding, finding_path):
         lines.append("Reason: %s" % ", ".join(rec["reasons"]))
     lines.append(finding_path)
     return lines[:5]
-
-
-def sha256_file(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
 
 
 def body_banned_words(body):
