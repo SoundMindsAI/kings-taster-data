@@ -262,7 +262,7 @@ class TestDecisions(unittest.TestCase):
         # so skip validate_record (existing behaviour on this branch).
         rec, _ = C.decide(self._package("left-pad", "1.3.0", "npm"), [
             _src("osv", data, status="failed"), self._clean_list(),
-        ], now=NOW, finding_id=FID,
+        ], now=NOW, template_version="1.0.0", finding_id=FID,
            finding_path="~/.kings-taster/findings/%s.json" % FID)
         self.assertEqual(rec["result"], "unknown")
         self.assertIn("injection_seen", rec["reasons"])
