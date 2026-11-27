@@ -169,11 +169,29 @@ def _list_canaries(iocs):
     return have
 
 
-def _caps_ok(cache_dir, manifest):
+def _caps_ok(cache_dir, manifest, *, verified=False):
+    """Return a failure detail if the manifest or a shard is over its cap, else None.
+
+    With verified=False (the default) every cached shard is reread and
+    recompressed. Pass verified=True only after KV.verify_release returned
+    code 0 or 3 for this same cache in this same run: the signed manifest's
+    per-shard gzip_bytes is then used instead of recompressing. In that mode a
+    missing or non-integer gzip_bytes is a failure; nothing is inferred from an
+    absent field. The manifest cap always uses the on-disk file size.
+    """
     man_path = os.path.join(cache_dir, "manifest.json")
     if os.path.isfile(man_path) and os.path.getsize(man_path) > MAX_MANIFEST_BYTES:
         return "the manifest is over the 5 MB cap"
     for s in manifest.get("shards") or []:
+        if not isinstance(s, dict):
+            return "the manifest shard list could not be read"
+        if verified:
+            gz = s.get("gzip_bytes")
+            if isinstance(gz, bool) or not isinstance(gz, int):
+                return "a shard has no signed gzip size in the manifest"
+            if gz > MAX_SHARD_GZIP_BYTES:
+                return "a cached shard is over the 5 MB gzip cap"
+            continue
         path = os.path.join(cache_dir, s.get("file") or "")
         if not os.path.isfile(path):
             continue
@@ -222,7 +240,9 @@ def _item1_unlocked(cache_dir, now, allowed, state):
         manifest = _read_json(os.path.join(cache_dir, "manifest.json"))
     except (OSError, ValueError):
         return False, "the manifest could not be read", latest.get("generated_at")
-    cap = _caps_ok(cache_dir, manifest)
+    # verify_release just returned 0 or 3 for this cache, so the signed
+    # manifest's gzip_bytes can stand in for recompressing every shard.
+    cap = _caps_ok(cache_dir, manifest, verified=True)
     if cap:
         return False, cap, latest.get("generated_at")
     return True, "list ok", latest.get("generated_at")
@@ -267,7 +287,11 @@ def _item3(checker):
 
 
 def _item4(routing):
-    """Return (ok, detail, nudge, notes). Missing line is a fail; 30-day notes are not."""
+    """Return (ok, detail, nudge, notes, nudge_name).
+
+    nudge_name is the first covered bot missing the line that has not already
+    been nudged, or None. Missing line is a fail; 30-day notes are not.
+    """
     routing = routing or {}
     covered = routing.get("covered") or []
     already = set(routing.get("already_nudged") or [])

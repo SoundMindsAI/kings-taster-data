@@ -285,6 +285,71 @@ class TestRefresh(SignedCacheCase):
         self.assertFalse(back["ok"], back)
         self.assertEqual(load(os.path.join(self.cache, "latest.json")), before)
 
+    def _patch_watermark_verify_to_fail(self):
+        """Make R._verify fail only when update_state is true. Returns the original."""
+        real = R._verify
+
+        def fake(dir_path, allowed, state, now, require_shards, update_state):
+            if update_state:
+                return 1, "simulated watermark write failure"
+            return real(dir_path, allowed, state, now, require_shards, update_state)
+
+        R._verify = fake
+        return real
+
+    def _assert_no_incoming_leftovers(self):
+        parent = R._incoming_parent(self.cache)
+        self.assertEqual([n for n in os.listdir(parent) if n.startswith(".incoming-")], [])
+
+    def test_watermark_failure_after_promote_restores_the_previous_cache(self):
+        self.seed_cache(shards=1)
+        before = load(os.path.join(self.cache, "latest.json"))
+        later = os.path.join(self.tmp, "later")
+        B.build(self.src, later, previous_dir=self.release, bootstrap=False, now=T1, root=self.root)
+        from tests.test_sign_verify import sign_dir
+        sign_dir(later, self.key)
+        real = self._patch_watermark_verify_to_fail()
+        try:
+            out = R.refresh(self.cache, later, fetcher=R.LocalFetcher(later),
+                            allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        finally:
+            R._verify = real
+        self.assertFalse(out["ok"], out)
+        self.assertFalse(out["silent"])
+        self.assertEqual(out["failed"], "unverified_list")
+        self.assertIn("The last good cache was kept.", out["lines"])
+        # The live cache is the T0 list again, as one complete tree.
+        after = load(os.path.join(self.cache, "latest.json"))
+        self.assertEqual(after["generated_at"], before["generated_at"])
+        self.assertEqual(load(os.path.join(self.cache, "manifest.json"))["generated_at"],
+                         before["generated_at"])
+        self.assertFalse(os.path.exists(R._bak_dir(self.cache)))
+        self._assert_no_incoming_leftovers()
+        # With the watermark writable again, the later release installs normally.
+        out2 = R.refresh(self.cache, later, fetcher=R.LocalFetcher(later),
+                         allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        self.assertTrue(out2["ok"], out2)
+        self.assertEqual(load(os.path.join(self.cache, "latest.json"))["generated_at"],
+                         load(os.path.join(later, "latest.json"))["generated_at"])
+        self.assertFalse(os.path.exists(R._bak_dir(self.cache)))
+
+    def test_watermark_failure_on_unchanged_list_is_not_ok(self):
+        self.seed_cache(shards=1)
+        before = load(os.path.join(self.cache, "latest.json"))
+        real = self._patch_watermark_verify_to_fail()
+        try:
+            out = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                            allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        finally:
+            R._verify = real
+        self.assertFalse(out["ok"], out)
+        self.assertFalse(out["silent"])
+        self.assertEqual(out["failed"], "unverified_list")
+        self.assertIn("The last good cache was kept.", out["lines"])
+        self.assertEqual(load(os.path.join(self.cache, "latest.json")), before)
+        self.assertFalse(os.path.exists(R._bak_dir(self.cache)))
+        self._assert_no_incoming_leftovers()
+
     def test_cache_symlink_is_not_followed(self):
         victim_dir = os.path.join(self.tmp, "outside")
         os.makedirs(victim_dir)
@@ -580,21 +645,74 @@ class TestClientHealth(SignedCacheCase):
         self.assertIn("did not verify", out["health"]["items"]["list"]["detail"])
 
     def test_oversized_shard_is_item1_failing(self):
+        # After verify has passed, item 1 reads the signed manifest's gzip_bytes
+        # rather than recompressing. The manifest here honestly records the
+        # oversized shard, so the verified path must still fail on the cap.
+        from kt.shards import gzip_size
         self.seed_cache(shards=1)
         import kt.verify as KV
         orig = KV.verify_release
         KV.verify_release = lambda *a, **k: (0, "VERIFIED")
         try:
-            man = load(os.path.join(self.cache, "manifest.json"))
+            man_path = os.path.join(self.cache, "manifest.json")
+            man = load(man_path)
             name = man["shards"][0]["file"]
-            path = os.path.join(self.cache, name)
-            with open(path, "wb") as f:
-                f.write(os.urandom(6 * 1024 * 1024))
+            raw = os.urandom(6 * 1024 * 1024)
+            _write(os.path.join(self.cache, name), raw)
+            man["shards"][0]["gzip_bytes"] = gzip_size(raw)
+            self.assertGreater(man["shards"][0]["gzip_bytes"], H.MAX_SHARD_GZIP_BYTES)
+            _write(man_path, json.dumps(man))
             out = self._health()
         finally:
             KV.verify_release = orig
         self.assertTrue(out["failing"])
         self.assertIn("5 MB", out["health"]["items"]["list"]["detail"])
+
+    def test_verified_manifest_gzip_bytes_over_cap_fails_even_with_a_small_shard(self):
+        self.seed_cache(shards=1)
+        import kt.verify as KV
+        orig = KV.verify_release
+        KV.verify_release = lambda *a, **k: (0, "VERIFIED")
+        try:
+            man_path = os.path.join(self.cache, "manifest.json")
+            man = load(man_path)
+            # Pick a shard that is actually cached; seed_cache copies by directory order.
+            entry = next(s for s in man["shards"]
+                         if os.path.isfile(os.path.join(self.cache, s["file"])))
+            shard = os.path.join(self.cache, entry["file"])
+            self.assertLess(os.path.getsize(shard), H.MAX_SHARD_GZIP_BYTES)
+            entry["gzip_bytes"] = H.MAX_SHARD_GZIP_BYTES + 1
+            _write(man_path, json.dumps(man))
+            out = self._health()
+        finally:
+            KV.verify_release = orig
+        self.assertTrue(out["failing"])
+        self.assertFalse(out["health"]["items"]["list"]["ok"])
+        self.assertIn("5 MB", out["health"]["items"]["list"]["detail"])
+
+    def test_verified_caps_do_not_trust_a_missing_or_bad_gzip_bytes(self):
+        self.seed_cache(shards=1)
+        man = load(os.path.join(self.cache, "manifest.json"))
+        self.assertIsNone(H._caps_ok(self.cache, man, verified=True))
+        for bad in (None, "4096", 4096.0, True):
+            doc = json.loads(json.dumps(man))
+            if bad is None:
+                del doc["shards"][0]["gzip_bytes"]
+            else:
+                doc["shards"][0]["gzip_bytes"] = bad
+            self.assertIsNotNone(H._caps_ok(self.cache, doc, verified=True), repr(bad))
+
+    def test_unverified_caps_still_recompress_the_shard_file(self):
+        self.seed_cache(shards=1)
+        man = load(os.path.join(self.cache, "manifest.json"))
+        name = man["shards"][0]["file"]
+        self.assertLessEqual(man["shards"][0]["gzip_bytes"], H.MAX_SHARD_GZIP_BYTES)
+        _write(os.path.join(self.cache, name), os.urandom(6 * 1024 * 1024))
+        # Not verified (default and explicit): the file on disk decides.
+        self.assertIn("5 MB", H._caps_ok(self.cache, man))
+        self.assertIn("5 MB", H._caps_ok(self.cache, man, verified=False))
+        # Verified: the signed manifest's under-cap gzip_bytes is used instead.
+        self.assertIsNone(H._caps_ok(self.cache, man, verified=True))
 
     def test_missing_list_canary_is_item2_failing(self):
         self.seed_cache(shards=1)

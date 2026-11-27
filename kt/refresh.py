@@ -238,9 +238,14 @@ def recover_cache(cache_dir):
 def _promote(work, cache_dir):
     """Replace the live cache with the verified work directory, as one swap.
 
-    The live directory is renamed aside, then the work directory is renamed
-    into place. A crash cannot leave a mix of old and new files in the live
-    path: the next call runs recover_cache() and gets one complete tree.
+    The live directory is renamed aside to <cache>.bak, then the work
+    directory is renamed into place. A crash cannot leave a mix of old and new
+    files in the live path: the next call runs recover_cache() and gets one
+    complete tree.
+
+    The bak directory is kept so the caller can still undo the swap with
+    _rollback() if a later step fails. Returns the bak path; the caller removes
+    it with _remove_bak() once the refresh has fully succeeded.
     """
     cache_dir = os.path.abspath(cache_dir)
     work = os.path.abspath(work)
@@ -251,7 +256,27 @@ def _promote(work, cache_dir):
     elif os.path.islink(cache_dir) or (os.path.exists(cache_dir) and not os.path.isdir(cache_dir)):
         os.unlink(cache_dir)
     os.rename(work, cache_dir)
-    _remove_bak(bak)
+    return bak
+
+
+def _rollback(cache_dir, bak):
+    """Undo _promote(): move the new live tree aside and put the bak tree back.
+
+    The new tree is renamed out of the live path first, so at every moment the
+    live path holds either one complete tree or nothing (and recover_cache()
+    restores bak). Returns the aside path for the caller to delete, or None.
+    """
+    cache_dir = os.path.abspath(cache_dir)
+    aside = None
+    if os.path.isdir(cache_dir) and not os.path.islink(cache_dir):
+        aside = tempfile.mkdtemp(prefix=".incoming-", dir=_incoming_parent(cache_dir))
+        os.rmdir(aside)
+        os.rename(cache_dir, aside)
+    elif os.path.islink(cache_dir) or os.path.exists(cache_dir):
+        os.unlink(cache_dir)
+    if os.path.isdir(bak) and not os.path.islink(bak):
+        os.rename(bak, cache_dir)
+    return aside
 
 
 def _cache_generated_at(cache_dir):
@@ -371,8 +396,14 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
                         return fail("stale_list", line)
                     if code in (0, 3):
                         if update_state:
-                            _verify(cache_dir, allowed, state, now,
-                                    require_shards, True)
+                            # The watermark write is part of the check. If it
+                            # does not succeed, do not report ok; the live
+                            # cache is still the previous verified cache.
+                            code, line = _verify(cache_dir, allowed, state, now,
+                                                 require_shards, True)
+                            if code not in (0, 3):
+                                return fail("unverified_list",
+                                            "The verify watermark could not be written (%s)." % line)
                         result["ok"] = True
                         result["silent"] = True
                         result["changed"] = False
@@ -436,10 +467,18 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
             prev = _cache_generated_at(cache_dir)
             if prev is not None and incoming_gen is not None and prev > incoming_gen:
                 return fail("unverified_list", "the incoming list is older than the cached list")
-            _promote(work, cache_dir)
+            bak = _promote(work, cache_dir)
             work = None
             if update_state:
-                _verify(cache_dir, allowed, state, now, require_shards, True)
+                # The previous tree stays at <cache>.bak until the watermark is
+                # written. If that fails, put the previous cache back and drop
+                # the new tree (the finally block deletes it).
+                code, line = _verify(cache_dir, allowed, state, now, require_shards, True)
+                if code not in (0, 3):
+                    work = _rollback(cache_dir, bak)
+                    return fail("unverified_list",
+                                "The verify watermark could not be written (%s)." % line)
+            _remove_bak(bak)
 
             result["ok"] = True
             result["changed"] = bool(changed)
