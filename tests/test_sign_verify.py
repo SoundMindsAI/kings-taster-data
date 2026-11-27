@@ -223,13 +223,48 @@ def load_pub(key):
 
 
 STUB_GH = r'''#!/usr/bin/env python3
-import json, os, sys
+import json, os, shutil, sys
 log = os.environ["STUB_GH_LOG"]
 with open(log, "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\n")
 if sys.argv[1:3] == ["release", "view"]:
+    if os.environ.get("STUB_GH_PREV"):
+        sys.exit(0)
     sys.stderr.write(os.environ.get("STUB_GH_VIEW_ERR", "release not found") + "\n")
     sys.exit(1)  # no releases yet (or, with STUB_GH_VIEW_ERR, an outage)
+if sys.argv[1:3] == ["release", "download"]:
+    dest = None
+    args = sys.argv[1:]
+    for i, a in enumerate(args):
+        if a == "--dir" and i + 1 < len(args):
+            dest = args[i + 1]
+    src = os.environ.get("STUB_GH_PREV", "")
+    if dest and src and os.path.isdir(src):
+        os.makedirs(dest, exist_ok=True)
+        for name in os.listdir(src):
+            path = os.path.join(src, name)
+            if os.path.isfile(path):
+                shutil.copy(path, os.path.join(dest, name))
+    sys.exit(0)
+if sys.argv[1:3] == ["run", "view"]:
+    print(os.environ.get("STUB_GH_RUN_VIEW") or json.dumps({
+        "headBranch": "main", "conclusion": "success",
+        "event": "workflow_dispatch", "workflowName": "pipeline"}))
+    sys.exit(0)
+if sys.argv[1:3] == ["run", "download"]:
+    dest = None
+    args = sys.argv[1:]
+    for i, a in enumerate(args):
+        if a == "--dir" and i + 1 < len(args):
+            dest = args[i + 1]
+    src = os.environ["STUB_GH_ARTIFACT"]
+    if dest:
+        os.makedirs(dest, exist_ok=True)
+        for name in os.listdir(src):
+            path = os.path.join(src, name)
+            if os.path.isfile(path):
+                shutil.copy(path, os.path.join(dest, name))
+    sys.exit(0)
 sys.exit(0)
 '''
 
@@ -258,11 +293,23 @@ class SignAndReleaseBase(unittest.TestCase):
             f.write(STUB_GH)
         os.chmod(self.gh, 0o755)
         self.log = os.path.join(self.tmp, "gh.log")
+        self.sig_log = os.path.join(self.tmp, "ssh-keygen.log")
+        self.probe_bin = os.path.join(self.tmp, "bin")
+        os.makedirs(self.probe_bin)
+        real = shutil.which("ssh-keygen")
+        wrap = os.path.join(self.probe_bin, "ssh-keygen")
+        with open(wrap, "w", encoding="utf-8") as f:
+            f.write("#!/bin/bash\nprintf '%%s\\n' \"$*\" >> \"$KT_SSH_KEYGEN_LOG\"\nexec \"%s\" \"$@\"\n" % real)
+        os.chmod(wrap, 0o755)
 
     def run_script(self, *args, key=None, env_extra=None):
-        env = {"PATH": os.environ["PATH"], "HOME": self.tmp, "KT_GH": self.gh, "STUB_GH_LOG": self.log,
-               "KT_SIGNING_KEY_PATH": key or self.key, "KT_NOW": T0_ISO}
+        env = {"PATH": self.probe_bin + os.pathsep + os.environ["PATH"], "HOME": self.tmp,
+               "KT_GH": self.gh, "STUB_GH_LOG": self.log,
+               "KT_SIGNING_KEY_PATH": key or self.key, "KT_NOW": T0_ISO,
+               "KT_SSH_KEYGEN_LOG": self.sig_log}
         env.update(env_extra or {})
+        env["PATH"] = self.probe_bin + os.pathsep + env.get("PATH", os.environ["PATH"])
+        env.setdefault("KT_SSH_KEYGEN_LOG", self.sig_log)
         p = subprocess.run(["bash", os.path.join(self.repo, "scripts", "sign-and-release.sh")] + list(args),
                            capture_output=True, text=True, env=env, timeout=120)
         return p.returncode, p.stdout + p.stderr

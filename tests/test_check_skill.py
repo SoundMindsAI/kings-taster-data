@@ -351,6 +351,26 @@ class TestDecisions(unittest.TestCase):
         self.assertEqual(rec["result"], "block")
         self.assertIn("malicious_match", rec["reasons"])
 
+    def test_list_hit_with_canary_flag_but_real_id_still_blocks(self):
+        # N1: a real entry mislabelled canary=yes is still a list match. Only the
+        # build-assigned "canary:" ids are skipped.
+        real = {"id": "kt:pypi:bloomcredit-python", "type": "package", "date": "2026-11-26", "canary": True}
+        rec, _ = self._decide(self._package(), [
+            _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
+            _src("kings_taster_list", {"class": "malicious", "hits": [real], "list_hits": 1}, verified=True),
+        ])
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertTrue(any(m["id"] == real["id"] for m in rec["matched_entries"]), rec["matched_entries"])
+        # A genuine canary id is skipped, whatever its flag says.
+        canary = {"id": "canary:package:pypi", "type": "package", "date": "2026-11-26", "canary": True}
+        rec2, _ = self._decide(self._package(), [
+            _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
+            _src("kings_taster_list", {"class": "malicious", "hits": [canary], "list_hits": 1}, verified=True),
+        ])
+        self.assertEqual(rec2["result"], "no_known_reports")
+        self.assertNotIn("malicious_match", rec2["reasons"])
+
     def test_canary_failure_is_unknown(self):
         rec, _ = self._decide(self._package(), [
             _src("osv", {"class": "clean", "hits": []}, canary_ok=False, status="failed"),
@@ -417,6 +437,17 @@ class TestHosts(unittest.TestCase):
         self.assertNotEqual((host or "").lower(), "github.com")
         # Matching host + same-host URL still works.
         self.assertTrue(C.host_allowed("github.com", "https://github.com" + self.LIST_OK))
+
+    def test_query_or_fragment_in_authority_is_refused(self):
+        # N10: '?' or '#' in the authority must not let '@github.com' become the host.
+        allowed = "https://github.com" + self.LIST_OK
+        self.assertTrue(C.host_allowed(allowed))
+        self.assertFalse(C.host_allowed("https://evil.example?x=@" + "github.com" + self.LIST_OK))
+        self.assertFalse(C.host_allowed("https://evil.example#x=@" + "github.com" + self.LIST_OK))
+        host_q, _ = C._split_host_path("https://evil.example?x=@github.com" + self.LIST_OK, "")
+        host_h, _ = C._split_host_path("https://evil.example#x=@github.com" + self.LIST_OK, "")
+        self.assertNotEqual((host_q or "").lower(), "github.com")
+        self.assertNotEqual((host_h or "").lower(), "github.com")
 
 
 @unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")

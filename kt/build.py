@@ -221,7 +221,7 @@ def build(sources_dir, out_dir, previous_dir=None, bootstrap=False, force_pause=
             "entries": final,
             "counts": {"entries": len(final), "revoked": len(revoked), "pending_review": len(hold),
                        "rejected_upstream_records": sum(rejected.values())}}
-    errs = validate_iocs(iocs, fast_entries=True)
+    errs = validate_iocs(iocs, fast_entries=True, root=root)
     if prev:
         errs += check_monotonic(prev, iocs)
     if errs:

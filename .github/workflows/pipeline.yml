@@ -84,6 +84,20 @@ jobs:
             python3 -E -s -m kt.validate work/release
           fi
           python3 -E -s -m kt.report work/release/build-report.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Pipeline health check
+        env:
+          MODE: ${{ steps.prev.outputs.mode }}
+        run: |
+          set -uo pipefail
+          args=(work/release --out work/release/pipeline-health.json)
+          if [ "$MODE" = "previous" ]; then args+=(--previous work/prev); fi
+          rc=0
+          python3 -E -s -m kt.health "${args[@]}" || rc=$?
+          case "$rc" in
+            0) ;;
+            10) echo "::warning::pipeline health: hold for review"; exit 0 ;;
+            *) exit "$rc" ;;
+          esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kt-release-unsigned
@@ -95,5 +109,6 @@ jobs:
             work/release/manifest.json
             work/release/shard-*.json
             work/release/build-report.json
+            work/release/pipeline-health.json
           if-no-files-found: error
           retention-days: 7

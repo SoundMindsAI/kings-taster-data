@@ -3,13 +3,14 @@
 # The private key never leaves the owner's machine; CI only builds unsigned files.
 #
 # Usage:
-#   scripts/sign-and-release.sh --run-id <id>   [--key PATH] [--accept-breaker] [--bootstrap] [--dry-run]
-#   scripts/sign-and-release.sh --from-dir DIR  [--key PATH] [--accept-breaker] [--bootstrap] [--dry-run]
+#   scripts/sign-and-release.sh --run-id <id>   [--key PATH] [--accept-breaker] [--accept-health] [--bootstrap] [--dry-run]
+#   scripts/sign-and-release.sh --from-dir DIR  [--key PATH] [--accept-breaker] [--accept-health] [--bootstrap] [--dry-run]
 #
 # Key: --key PATH or env KT_SIGNING_KEY_PATH. The path and the key are never printed.
 # Steps: get the unsigned artifact -> validate -> check against the live release (signature +
-# monotonic generated_at + revocations) -> circuit breaker -> sign with ssh-keygen -Y sign ->
-# verify our own signatures -> create the dated release -> update the kt-latest pointer.
+# monotonic generated_at + revocations) -> circuit breaker -> pipeline health -> sign with
+# ssh-keygen -Y sign -> verify our own signatures -> create the dated release -> update the
+# kt-latest pointer. Health runs before signing so a fail or hold cannot produce signatures.
 # Shards (shard-*.json) are not signed one by one: each is pinned by its SHA-256 in the signed manifest.json,
 # which keeps a release under GitHub's 1,000-asset limit.
 # --dry-run stops after verification and creates nothing on GitHub.
@@ -24,7 +25,7 @@ POINTER_TAG="kt-latest"
 GH="${KT_GH:-gh}"
 FILES=(latest.json iocs.json conformance.json stats.json manifest.json)
 
-RUN_ID="" FROM_DIR="" KEY="${KT_SIGNING_KEY_PATH:-}" ACCEPT_BREAKER=0 BOOTSTRAP=0 DRY_RUN=0
+RUN_ID="" FROM_DIR="" KEY="${KT_SIGNING_KEY_PATH:-}" ACCEPT_BREAKER=0 ACCEPT_HEALTH=0 BOOTSTRAP=0 DRY_RUN=0
 die() { echo "sign-and-release: REFUSED: $*" >&2; exit 1; }
 
 # Prints "present" or "absent". Only gh's explicit "release not found" counts as absent; any other failure
@@ -42,6 +43,7 @@ while [ $# -gt 0 ]; do
     --from-dir) FROM_DIR="${2:?}"; shift 2 ;;
     --key) KEY="${2:?}"; shift 2 ;;
     --accept-breaker) ACCEPT_BREAKER=1; shift ;;
+    --accept-health) ACCEPT_HEALTH=1; shift ;;
     --bootstrap) BOOTSTRAP=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "unknown argument" ;;
@@ -93,7 +95,7 @@ fi
 for f in "${FILES[@]}" build-report.json; do [ -f "$ART/$f" ] || die "artifact is missing $f"; done
 for f in "$ART"/*; do
   b="$(basename "$f")"
-  case "$b" in latest.json|iocs.json|conformance.json|stats.json|manifest.json|build-report.json) continue ;; esac
+  case "$b" in latest.json|iocs.json|conformance.json|stats.json|manifest.json|build-report.json|pipeline-health.json) continue ;; esac
   [[ "$b" =~ ^shard-(npm|pypi|kev|domain|url|ip|hash|repo_owner)(-[0-9a-f]{2})?\.json$ ]] || die "unexpected file in artifact"
 done
 
@@ -135,7 +137,25 @@ if "${PY[@]}" -c 'import json,sys;sys.exit(0 if json.load(open(sys.argv[1]))["ne
   echo "sign-and-release: breaker tripped ($reasons), accepted by operator"
 fi
 
-# 5. Sign, then verify our own signatures.
+# 5. Pipeline health check (SPEC.md §7.5), before any signing. A failure or an
+# unaccepted size-jump hold must not produce signatures or a publish.
+# Signatures are verified by kt.verify after signing, not by this unsigned check.
+health_args=("$ART" --pre-sign --out "$ART/pipeline-health.json")
+if [ "$HAVE_PREV" -eq 1 ]; then health_args+=(--previous "$PREV"); fi
+set +e
+"${PY[@]}" -m kt.health "${health_args[@]}" "${NOW_ARGS[@]}"
+health_rc=$?
+set -e
+case "$health_rc" in
+  0) ;;
+  10)
+    [ "$ACCEPT_HEALTH" -eq 1 ] || die "pipeline health hold (size jump); a person must review, then rerun with --accept-health"
+    echo "sign-and-release: health hold accepted by operator"
+    ;;
+  *) die "pipeline health check failed (exit $health_rc); not publishing" ;;
+esac
+
+# 6. Sign, then verify our own signatures.
 for f in "${FILES[@]}"; do
   [ ! -e "$ART/$f.sig" ] || die "unexpected existing signature"
   ssh-keygen -Y sign -q -f "$KEY" -n "$NS" "$ART/$f" </dev/null || die "signing failed"
@@ -151,7 +171,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# 6. Publish: dated release first, then move the pointer.
+# 7. Publish: dated release first, then move the pointer.
 NOTES="$WORK/notes.md"
 cat > "$NOTES" <<NOTES_EOF
 King's Taster list file $TAG. Verify with ssh-keygen -Y verify (namespace "$NS"); see config/allowed_signers.

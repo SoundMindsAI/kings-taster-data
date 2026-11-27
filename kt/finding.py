@@ -63,7 +63,7 @@ def official_url_problem(url, allowed_hosts):
     except ValueError:
         return "unparsable"
     host = (parts.hostname or "").lower()
-    if parts.scheme != "https" or host not in allowed_hosts or parts.port or parts.username or parts.password:
+    if parts.scheme != "https" or host not in allowed_hosts or parts.port is not None or parts.username or parts.password:
         return "not an official https host"
     path = parts.path
     decoded = path
