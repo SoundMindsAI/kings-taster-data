@@ -1,10 +1,10 @@
 # kings-taster-check
 
-Load when asked to check a repo, package, or link.
+Load to check a repo, package, or link.
 
 Never say "safe". Never print or summarize a key. Never read a raw response or README. Never contact, clone, install, or run the item. Write only under `~/.kings-taster/` and temp.
 
-If `~/.kings-taster/health.json` has status failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
+If `~/.kings-taster/health.json` is failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
 
 Classify the item (package, repo, or link). Run every required source. Show the worst: Block, Unknown, Caution, No known reports. Show each Block or Caution.
 
@@ -24,7 +24,7 @@ Read keys only from `~/.kings-taster/keys.env` (`chmod 600`).
 
 Run the Commands exactly. Save raw responses to unread temp files. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/`. Reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding. Open it when asked why.
 
-Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block, Unknown, or links. Cache the RDAP bootstrap for 7 days.
+Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block, Unknown, or links. Never cache a link. Cache the RDAP bootstrap for 7 days.
 
 <!-- commands -->
 ## Commands
