@@ -65,7 +65,9 @@ scripts/verify.sh <download-dir> --allowed-signers config/allowed_signers --stat
 ```
 
 `config/allowed_signers` holds the current and next public keys. Reject any `latest.json` older than the last
-one you accepted.
+one you accepted. A signed `keys.json` will name those same keys once the first one is published, and will be
+verified against the master public keys in `config/root_pins` (see [SPEC.md §7.3A](SPEC.md#73a-the-keys-file-keysjson)).
+Those pins are not published yet. A missing or unsigned `keys.json` is refused.
 
 ## How it's built
 

@@ -39,11 +39,16 @@ in [config/allowed_signers](config/allowed_signers). The current signing key's f
 kings-taster-current  SHA256:CKhwT695U0zdQ6CIgP3SCRoKfGDT7Gf0/YFEtB8BKp4 (ED25519)
 ```
 
+A signed `keys.json` will name the current and next signing keys once the first one is published, and will be
+verified against the master public keys in [config/root_pins](config/root_pins) (see SPEC.md §7.3A). Those
+pins are not published yet. Master keys are held only by the maintainer, in two separate places, never by a
+bot or the signing computer. A missing or unsigned `keys.json` is refused.
+
 To verify a release, see "Verify a release" in the [README](README.md).
 
 ## Supported versions
 
 | Part | Supported version |
 |---|---|
-| `SPEC.md` | 1.4 |
+| `SPEC.md` | 1.5 |
 | List format (`schema_version`) | 1 |

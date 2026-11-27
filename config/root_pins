@@ -1,0 +1,8 @@
+# King's Taster master public-key pins (OpenSSH, ssh-keygen -Y verify). Public keys only.
+# Namespace: kings-taster-keys. At most two keys: kings-taster-root and kings-taster-root-backup.
+# Format (one line per key), once the keys are published:
+#   kings-taster-root namespaces="kings-taster-keys" ssh-ed25519 AAAA... [comment]
+#   kings-taster-root-backup namespaces="kings-taster-keys" ssh-ed25519 AAAA... [comment]
+#
+# No master public keys have been published yet. The first pins will be added after the
+# maintainer publishes them. Until then, a keys.json file is refused.

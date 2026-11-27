@@ -76,7 +76,7 @@ def _ssh_keygen():
     return exe
 
 
-def verify_file(path, allowed):
+def verify_file(path, allowed, namespace=NAMESPACE, principals=PRINCIPALS):
     sig = path + ".sig"
     if not os.path.exists(sig):
         raise VerifyError("%s: signature missing" % os.path.basename(path))
@@ -87,24 +87,34 @@ def verify_file(path, allowed):
     if sig_bytes.count(b"-----BEGIN SSH SIGNATURE-----") != 1 or sig_bytes.count(b"-----END SSH SIGNATURE-----") != 1:
         raise VerifyError("%s: signature file must hold exactly one signature" % os.path.basename(path))
     exe = _ssh_keygen()
-    fp = subprocess.run([exe, "-Y", "find-principals", "-s", sig, "-f", allowed, "-n", NAMESPACE],
+    fp = subprocess.run([exe, "-Y", "find-principals", "-s", sig, "-f", allowed, "-n", namespace],
                         capture_output=True, text=True, timeout=30)
-    principals = [p for p in fp.stdout.split() if p in PRINCIPALS]
-    if fp.returncode != 0 or len(principals) != 1:
+    found = [p for p in fp.stdout.split() if p in principals]
+    if fp.returncode != 0 or len(found) != 1:
         raise VerifyError("%s: not signed by an allowed key" % os.path.basename(path))
     with open(path, "rb") as data:
-        v = subprocess.run([exe, "-Y", "verify", "-f", allowed, "-I", principals[0], "-n", NAMESPACE, "-s", sig],
+        v = subprocess.run([exe, "-Y", "verify", "-f", allowed, "-I", found[0], "-n", namespace, "-s", sig],
                            stdin=data, capture_output=True, text=True, timeout=60)
     out = v.stdout + v.stderr
-    if v.returncode != 0 or "Good \"%s\" signature for %s with ED25519 key" % (NAMESPACE, principals[0]) not in out:
+    if v.returncode != 0 or "Good \"%s\" signature for %s with ED25519 key" % (namespace, found[0]) not in out:
         raise VerifyError("%s: signature did not verify" % os.path.basename(path))
-    return principals[0]
+    return found[0]
 
 
 def verify_release(d, allowed, state=None, update_state=False, template_version=None, now=None,
                    max_age_hours=48, require_shards=False):
     check_allowed_signers(allowed)
     signers = {name: verify_file(os.path.join(d, name), allowed) for name in FILES}
+    keys_path = os.path.join(d, "keys.json")
+    if os.path.exists(keys_path) or os.path.exists(keys_path + ".sig"):
+        from . import keys as K
+        try:
+            kdoc, _, _ = K.verify_keys_file(keys_path, K.DEFAULT_PINS, now=now or utc_now())
+        except (K.KeysError, VerifyError, OSError, ValueError) as e:
+            raise VerifyError("keys.json: %s" % e)
+        for name, principal in signers.items():
+            if not K.signing_key_usable(kdoc, now=now or utc_now(), principal=principal):
+                raise VerifyError("%s: signed by a key that keys.json does not allow" % name)
     with open(os.path.join(d, "latest.json"), "rb") as f:
         raw = f.read()
     try:
