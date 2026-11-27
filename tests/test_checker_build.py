@@ -87,6 +87,8 @@ class TestCanonicalize(unittest.TestCase):
     def test_vectors_strict_default(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
         refused = 0
+        pct = 0
+        space_control = 0
         for v in B.canonicalization_vectors():
             raw = B.decode_c_escapes(v["input"])
             try:
@@ -94,10 +96,16 @@ class TestCanonicalize(unittest.TestCase):
             except ValueError:
                 refused += 1
                 auth = re.split(rb"[/?]", raw.split(b"://", 1)[-1], maxsplit=1)[0]
-                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw) or b"%" in auth, v["input"])
+                # Classify % in the host first; the remaining refusals are space/control.
+                if b"%" in auth:
+                    pct += 1
+                else:
+                    self.assertTrue(re.search(rb"[\x00-\x20]", raw), v["input"])
+                    space_control += 1
                 continue
             self.assertEqual(got.encode("latin-1"), B.decode_c_escapes(v["expected"]), v["input"])
-        self.assertEqual(refused, 6)
+        # The 6 strict refusals are 4 with % in the host and 2 with space/control.
+        self.assertEqual((pct, space_control, refused), (4, 2, 6))
 
     def test_vectors_pass_non_strict(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
@@ -349,15 +357,19 @@ class TestRegexParityAndKeys(unittest.TestCase):
     def test_skills_state_key_rules(self):
         for name in ("kings-taster-check.md", "kings-taster-build.md"):
             text = text_of(name)
-            for needle in ("^[A-Za-z0-9_-]{1,128}$", "that source has failed", "the key is never printed",
+            for needle in ("^[A-Za-z0-9_-]{1,128}$", "If it doesn't, that source has failed.",
+                           "Never print the key", "re.fullmatch", "never grep",
                            "--data @FILE", "`-H @-` uses stdin", "the POST body must be `--data @FILE`"):
                 self.assertIn(needle, text, (name, needle))
+            self.assertIn("[[ $", text)
+            self.assertRegex(text, r"\[\[ \$[A-Z_]+ =~ \^\[A-Za-z0-9_-\]\{1,128\}\$ \]\]")
 
     def test_skill_states_strict_refusals(self):
         text = B.skill_text()
         for needle in ("authority contains `%`", "never convert an IDN host to Punycode", "0x80",
                        "`[` or `]`", "not a valid IPv4 address", "leading dot or an empty label",
-                       "last label is all digits"):
+                       "last label is all digits",
+                       "two or more trailing dots", "differs from node's behavior and is harmless"):
             self.assertIn(needle, text, needle)
 
 
