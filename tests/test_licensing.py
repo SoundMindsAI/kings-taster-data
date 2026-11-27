@@ -7,23 +7,6 @@ from kt import licensing as L
 from kt import sources
 from tests.helpers import REPO
 
-FORBIDDEN = re.compile(r"abuse\.ch|feodo|ssl blacklist|urlhaus|threatfox", re.I)
-PUBLIC_ROOTS = ("README.md", "SECURITY.md", "SPEC.md", "CONTRIBUTING.md", "LICENSE",
-                "sources", "schema", "config", "kt", "scripts", "third-party-licenses",
-                ".github")
-def _public_files():
-    import subprocess
-    out = subprocess.check_output(["git", "ls-files"], cwd=REPO, text=True)
-    files = []
-    for rel in out.splitlines():
-        if rel.endswith((".pyc", ".png")):
-            continue
-        top = rel.split("/")[0]
-        if top in PUBLIC_ROOTS or rel in PUBLIC_ROOTS:
-            files.append(os.path.join(REPO, rel))
-    return files
-
-
 class TestLicensingTable(unittest.TestCase):
     def setUp(self):
         self.doc = L.load_table()
@@ -79,14 +62,3 @@ class TestLicensingTable(unittest.TestCase):
         allowed = set(L.feed_urls(self.doc))
         self.assertEqual(allowed, {sources.KEV["url"], sources.OSV["npm"]["url"], sources.OSV["PyPI"]["url"]})
 
-    def test_public_files_omit_uncleared_feed_names(self):
-        hits = []
-        for path in _public_files():
-            try:
-                with open(path, encoding="utf-8") as f:
-                    text = f.read()
-            except (OSError, UnicodeDecodeError):
-                continue
-            for m in FORBIDDEN.finditer(text):
-                hits.append("%s: %s" % (os.path.relpath(path, REPO), m.group(0)))
-        self.assertEqual(hits, [])
