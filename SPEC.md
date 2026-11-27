@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.2, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.3, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -25,7 +25,7 @@ each citing its sources and their dates. It never says "safe".
   It can make mistakes or be tricked by what it reads. "No known reports" means nothing was found, not that
   it's safe. Your checks go from your bot to the sources listed, and to your bot's AI provider, never to
   SoundMinds. Any keys you add are visible to your bot's AI.
-- Only the official template link on soundminds.ai is from us; copies from anywhere else are not.
+- The install button on soundminds.ai will be the only official copy from us; copies from anywhere else are not.
 - You will install King's Taster from [soundminds.ai/kings-taster](https://soundminds.ai/kings-taster) once that page is live.
 
 ## 2. Trust model
@@ -123,9 +123,11 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
 - READMEs, lockfiles, descriptions, scripts and raw responses never enter the AI's context; `conformance.json`
   and `iocs.json` are read from disk by code, never loaded whole.
 - There are two routines, each one line pointing to a skill: a daily list refresh, and one weekly health check
-  (§4D). The weekly health check covers the conformance rerun and the routing check, so there is one weekly run
-  instead of three. Both are silent unless something changed for the user.
-- **Caching:** the list file is kept until a new signed `latest.json` appears (compare its hash first).
+  (§4D). The weekly health check covers the conformance rerun and the routing check, so the self-check, the conformance rerun and the routing check share one weekly run instead of three separate ones. Both routines are silent unless something changed for the user.
+- **Caching:** the list file is kept until a new signed `latest.json` appears (compare its hash first). Once
+  the list is sharded (§6.5), the manifest and the cached shards are kept until a new signed manifest appears.
+  The bot compares the signed `latest.json` and manifest hashes before downloading anything, and refetches a
+  cached shard only if its SHA-256 in the new manifest changed.
   Package and repo verdicts may be reused for the same name, version and list-file hash within 24 hours,
   showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
   file is cached for 7 days.
@@ -180,18 +182,20 @@ when the line is present and sends one nudge when it's removed.
 checks four things:
 
 1. **The list file:** it is fresh (under 48 hours old), its signature verifies, its version isn't older than the
-   last one accepted, its date isn't more than 10 minutes ahead of `date -u`, and it is under the size cap (§7.5).
+   last one accepted, its date isn't more than 10 minutes ahead of `date -u`, and, once the planned size caps exist (§7.5), it is under them.
 2. **Canaries:** for each required source, the fixed known-bad test item is caught. That means the OSV canary
    package, the list file's fake entry for each type, and Google's Safe Browsing test URL if it's set up. RDAP
-   gets a fixed known domain.
+   is tested with a fixed, known domain.
 3. **The checker,** if it's in use: its SHA-256 still matches the approved one, and `conformance.json` passes 100%.
 4. **The routing line** is still in each covered bot (§4C).
 
-If item 1, 2 or 3 fails, the bot tells you in at most 3 lines what failed, since when, and the one thing to do.
+If item 1 or 2 fails, the bot tells you in at most 3 lines what failed, since when, and the one thing to do.
 It writes `~/.kings-taster/health.json` with `status: failing`. While that is set, every check answers
 "Unknown, don't proceed (health check failing: <reason>)". The next passing self-check or `status` run clears
-it. A failing checker only switches the bot back to checklist mode; if checklist mode's own canaries pass,
-checks keep working.
+it.
+
+If item 3 fails, the bot tells you the same way, and it switches back to checklist mode instead of answering
+Unknown. If checklist mode's own canaries pass, checks keep working.
 
 If item 4 fails, you get the one weekly nudge from §4C. Verdicts aren't affected, because the checks still work
 and only the routing has a gap.
@@ -202,7 +206,8 @@ and only the routing has a gap.
 
 Before release, tests must break each item one at a time (a stale list, a bad signature, a future date, an
 oversized file, a missing canary, a changed checker and a removed routing line). Each must be reported within
-one self-check or `status` run, items 1 to 3 must turn every check into Unknown, and a pass must clear it.
+one self-check or `status` run, items 1 and 2 must turn every check into Unknown, a failing item 3 must switch
+the bot to checklist mode, and a pass must clear it.
 
 ## 5. Optional local checker
 
@@ -251,6 +256,24 @@ retire. A retired entry gives "Caution: previously listed".
 
 Package and hash data stays fresh for 48 hours, after which the list file counts as stale (Unknown). URLs, domains and IPs
 are always checked live as well.
+
+### 6.5 Sharding (planned, not built yet)
+
+Today each release has one `iocs.json`. A live full build was 196 MB, or 7.2 MB gzipped, with 238,538 entries,
+which is too much for a bot to download for every check. The list will therefore be split into shards. This
+release does not build shards yet.
+
+- **Shard key.** Entries are grouped by ecosystem (npm, PyPI) or by type, and then by the first byte of the
+  SHA-256 of each entry's `match_key`. That gives up to 256 shards per ecosystem or type. The prefix length
+  may change so that each shard stays under its cap and still holds many entries.
+- **Signed manifest.** A small signed `manifest.json` lists each shard's name, SHA-256, entry count and size.
+  `latest.json` points to it.
+- **What the bot fetches.** The bot downloads only the shard for the item it's checking, checks its SHA-256
+  against the manifest, and caches it (§4B).
+- **Caps.** The manifest is at most 5 MB, and each shard is at most 5 MB gzipped. A client rejects anything
+  over a cap as `check_failed`, and a shard over its cap fails the build.
+- **Privacy.** Fetching a shard shows GitHub only the item's ecosystem and a hash bucket shared by many items,
+  never the item itself.
 
 ## 7. Pipeline and signing
 
@@ -303,14 +326,16 @@ the first release exists, it passes with a notice.
 **Planned, not built yet:** a daily pipeline health check that extends the watchdog and runs after each daily
 build. It will check:
 
-- **Build:** today's `iocs.json` and `latest.json` were built and released.
+- **Build:** today's `latest.json` and list files were built and released. Once the list is sharded (§6.5),
+  that means `latest.json`, `manifest.json` and every shard, with every shard's SHA-256 matching the manifest.
 - **Signing:** both verify against the current allowed-signers key, and the canary entries are present.
 - **No source went silent.** A source fails if its fetch failed, if it returned zero entries when it shouldn't,
   or if it added nothing for longer than its usual gap. The starting gaps are 3 days for OSV `MAL-` records and
   14 days for CISA KEV. They will be tuned from 30 days of history, and the final numbers recorded in this repo.
-- **Size cap:** `iocs.json` must be at most 5 MB. That is a starting cap; the final cap will be set from real
-  sizes plus headroom. Clients will reject a file over the cap as `check_failed`, and a jump of more than 50%
-  from one day to the next will be held for review.
+- **Size caps:** the manifest must be at most 5 MB, and each shard at most 5 MB gzipped (§6.5). Clients will
+  reject anything over a cap as `check_failed`. A shard over its cap fails the build, and the prefix length is
+  raised. A jump of more than 50% from one day to the next, in total size or in any shard, will be held for
+  review.
 - **Stale dates:** `generated_at` must be today's date (UTC) and not in the future, and every entry's
   `first_seen` must be on or before `generated_at`. If there is no new release within 26 hours, SoundMinds is
   alerted. After 48 hours with no release, clients answer Unknown for list matches on their own (§6.4).
@@ -365,7 +390,7 @@ Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at 
 | Your bot's AI provider | your request, the validated fields, the finding record, and any key you add |
 | OSV.dev | package names and versions (private-registry names only if you choose) |
 | npm and PyPI registries | package names, through metadata lookups |
-| GitHub | the repo owner and name, plus list-file downloads (your IP address) |
+| GitHub | the repo owner and name, plus downloads of `latest.json` and the list (your IP address). Once the list is sharded (§6.5), that means the manifest and the shard for each item, which shows its ecosystem and a short hash bucket shared by many items, never the item itself. |
 | IANA, RDAP servers | the bootstrap file request, and the domain |
 | Your link-reputation provider | what that provider's lookup needs |
 | The link's own site | nothing |
@@ -377,15 +402,15 @@ These rules are a release requirement.
 
 **Lookups send only the item.** A check sends only the item to the official sources named in that check's
 answer: the package name and version, the repo's owner and name, or the domain (or the link's 4-byte hash prefix
-for Safe Browsing). Nothing about you is sent. The one honest exception is that, like any web request, each one
-carries your bot computer's IP address. A Safe Browsing key, if you add one, goes to Google with that lookup.
-The daily list download goes to GitHub. Your IP address goes only to the sources being queried, and to GitHub
-for the list download. It is never written into a report or any X post. Posting works the way any post on X
+for Safe Browsing). Nothing about you is sent, with two exceptions. Like any web request, each lookup carries your bot computer's IP address. And a Safe Browsing key, if you add one, goes to Google with that lookup.
+The daily list download goes to GitHub. Once the list is sharded (§6.5), that means the manifest and shards,
+and a shard shows only the item's ecosystem and a hash bucket shared by many items. Your IP address goes only to
+the sources being queried, and to GitHub for the list downloads. It is never written into a report or any X post. Posting works the way any post on X
 does: X sees the account that posts it.
 
 **Reports are the only finding data that leaves.** Every report goes through these steps:
 
-0. **The pre-send block.** A report is built only from the fixed fields of the reply template: the marker line,
+1. **The pre-send block.** A report is built only from the fixed fields of the reply template: the marker line,
    the item type, the defanged item, the result, the source name and date, and one source link. A fixed
    scanner then checks the whole draft and refuses it if it finds anything beyond the reported item itself: an
    IPv4 or IPv6 address, an email address, a file path (`/…`, `~/…`, `C:\…`, `\\…`), a username (the output of
@@ -396,17 +421,17 @@ does: X sees the account that posts it.
    see "Report blocked: it contained <type>", never the matched value, and the draft is deleted. There is no
    "send anyway"; you may start a fresh report, which is scanned again. In checker mode, `checker.py` runs the
    same scanner.
-1. King's Taster shows the exact post text, character for character, and where it goes (the official thread's
+2. King's Taster shows the exact post text, character for character, and where it goes (the official thread's
    link).
-2. It asks "OK to send?" every time. There is no standing approval, no batch approval and no "always allow".
+3. It asks "OK to send?" every time. There is no standing approval, no batch approval and no "always allow".
    Only a yes to that exact text counts.
-3. A decline is final for that finding. Any change to the text means showing it and asking again.
-4. On a yes, King's Taster posts, reads the post back to confirm it's up, and gives you the live link to the
+4. A decline is final for that finding. Any change to the text means showing it and asking again.
+5. On a yes, King's Taster posts, reads the post back to confirm it's up, and gives you the live link to the
    reply. If the post fails, it says "Not sent" and shows the reason.
 
 **The plain statement,** shown at first run, on the King's Taster page and in this repo's README:
 
-> When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what it checks, like anything you ask it. A finding is shared only when you approve the exact post, each time.
+> When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what you ask it to check and what comes back, like anything else you ask it. A finding is shared only when you approve the exact post, each time.
 
 No wording stronger than this statement is ever used.
 
@@ -426,3 +451,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 | 1.0 | 2026-11-26 | First public version. |
 | 1.1 | 2026-11-26 | Adds §4C (first-run routing and the weekly routing check), the `kings-taster-routing` skill, and the install page. |
 | 1.2 | 2026-11-26 | Adds §4D (the weekly health check and `status`), the `kings-taster-health` skill, the planned daily pipeline health check and size cap (§7.5), and the data sharing rules (§10.1). Folds the weekly routing check into the health check, so there are two routines. |
+| 1.3 | 2026-11-26 | Adds the planned sharded list (§6.5): shards by ecosystem or type and hash prefix, a signed manifest, per-shard caching and caps, and what a shard download shows GitHub. Clarifies that a failing checker switches the bot to checklist mode rather than answering Unknown, and that the size caps are planned. |

@@ -14,13 +14,13 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
 
 ## How to use it
 
-**Coming soon.** You will install King's Taster from the install button on [soundminds.ai/kings-taster](https://soundminds.ai/kings-taster) once that page is live. That button is the only official place to get it, so don't install King's Taster from anywhere else.
+**Coming soon.** You will install King's Taster from the install button on [soundminds.ai/kings-taster](https://soundminds.ai/kings-taster) once that page is live. That button will be the only official place to get it, so don't install King's Taster from anywhere else.
 
 King's Taster is an AI, so it can be wrong or tricked. If it answers Unknown, or you have any doubt, don't proceed.
 
 ## What your bot sends
 
-When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what it checks, like anything you ask it. A finding is shared only when you approve the exact post, each time.
+When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what you ask it to check and what comes back, like anything else you ask it. A finding is shared only when you approve the exact post, each time.
 
 The full rules are in [SPEC.md §10.1](SPEC.md#101-data-sharing-rules).
 
