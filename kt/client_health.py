@@ -6,9 +6,12 @@ import os
 import re
 import tempfile
 
+import subprocess
+
 from .common import parse_time, sha256_file, utc_now
 from .shards import gzip_size
 from .validate import CANARY_TYPES, ECO_PREFIX, MAX_MANIFEST_BYTES
+from . import refresh as KR
 from . import verify as KV
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -182,6 +185,14 @@ def _caps_ok(cache_dir, manifest):
 
 
 def _item1(cache_dir, now, allowed, state):
+    if not cache_dir:
+        return False, "the list is missing", None
+    with KR._path_lock(os.path.abspath(cache_dir)):
+        cache_dir = KR.recover_cache(cache_dir)
+        return _item1_unlocked(cache_dir, now, allowed, state)
+
+
+def _item1_unlocked(cache_dir, now, allowed, state):
     latest_path = os.path.join(cache_dir, "latest.json")
     if not os.path.isfile(latest_path):
         return False, "the list is missing", None
@@ -201,7 +212,7 @@ def _item1(cache_dir, now, allowed, state):
         )
     except KV.VerifyError as e:
         return False, "the list did not verify (%s)" % str(e)[:120], latest.get("generated_at")
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
         return False, "the list did not verify", latest.get("generated_at")
     if code == 5:
         return False, "the list is older than 48 hours", latest.get("generated_at")
@@ -308,7 +319,7 @@ def run(*, cache_dir, now=None, status=False, allowed_signers=None, state=None,
         routing["already_nudged"] = already
         ok4, detail4, nudge, notes, nudge_name = _item4(routing)
         nudged = list(persisted)
-        if nudge and nudge_name and nudge_name not in nudged:
+        if (not status) and nudge and nudge_name and nudge_name not in nudged:
             nudged.append(nudge_name)
 
         failing = not (ok1 and ok2)
@@ -360,8 +371,7 @@ def run(*, cache_dir, now=None, status=False, allowed_signers=None, state=None,
         weekly_lines = (weekly_lines + [nudge] + notes) if (failing or not ok3) else ([nudge] + notes)
     elif notes and (status or not ok4 or failing or not ok3):
         # 30-day notes ride with a nudge, or appear on a status run.
-        if status:
-            pass
+        pass
 
     status_lines = [
         "List: %s%s" % ("ok" if ok1 else "fail", "" if ok1 else " (%s)" % detail1),
@@ -371,10 +381,6 @@ def run(*, cache_dir, now=None, status=False, allowed_signers=None, state=None,
         "List date: %s" % (list_date or "unknown"),
         "Mode: %s" % mode,
     ]
-    if list_date:
-        # already included
-        pass
-    # at most 8
     if notes and status:
         for n in notes:
             if len(status_lines) < 8:

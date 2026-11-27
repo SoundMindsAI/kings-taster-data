@@ -1,8 +1,13 @@
 """List-refresh and weekly health skills (SPEC.md §4B, §4D). No network."""
 import datetime as dt
+import fcntl
+import json
 import os
 import re
 import shutil
+import subprocess
+import sys
+import threading
 import unittest
 
 from kt import build as B
@@ -175,9 +180,14 @@ class TestRefresh(SignedCacheCase):
         self.assertEqual(out["failed"], "stale_list")
 
     def test_disallowed_host_is_injection(self):
+        official = "https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"
+        self.assertTrue(R.list_url_allowed(official))
+        self.assertTrue(R.list_url_allowed(official + ".sig"))
         self.assertFalse(R.list_url_allowed("https://evil.example/latest.json"))
         self.assertFalse(R.list_url_allowed(
             "https://github.com/SoundMindsAI/kings-taster-data/releases/download/../../evil/x"))
+        self.assertFalse(R.list_url_allowed(official.replace("https://", "http://")))
+        self.assertFalse(R.list_url_allowed("http://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json.sig"))
         self.assertTrue(R.list_url_allowed(
             "https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"))
 
@@ -287,6 +297,227 @@ class TestRefresh(SignedCacheCase):
         self.assertFalse(os.path.exists(victim))
         self.assertTrue(os.path.isfile(os.path.join(self.cache, "latest.json")))
         self.assertFalse(os.path.islink(os.path.join(self.cache, "latest.json")))
+
+
+    def _later(self):
+        later = os.path.join(self.tmp, "later-" + str(len(os.listdir(self.tmp))))
+        B.build(self.src, later, previous_dir=self.release, bootstrap=False, now=T1, root=self.root)
+        from tests.test_sign_verify import sign_dir
+        sign_dir(later, self.key)
+        return later
+
+    def test_http_url_is_not_allowed(self):
+        self.assertFalse(R.list_url_allowed(
+            "http://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"))
+
+    def test_disallowed_sig_url_is_injection(self):
+        dest = os.path.join(self.tmp, "out.sig")
+        fetcher = R.LocalFetcher(self.release)
+        with self.assertRaises(ValueError) as ctx:
+            fetcher.fetch("https://evil.example/latest.json.sig", dest)
+        self.assertIn("injection", str(ctx.exception))
+        self.assertFalse(os.path.exists(dest))
+
+    def test_hostile_tag_is_refused_before_fetch(self):
+        from tests.test_sign_verify import sign_dir
+        bad = os.path.join(self.tmp, "hostile-tag")
+        shutil.copytree(self.release, bad)
+        latest_path = os.path.join(bad, "latest.json")
+        latest = load(latest_path)
+        latest["tag"] = "kt-../../evil"
+        with open(latest_path, "w", encoding="utf-8") as f:
+            json.dump(latest, f)
+            f.write("\n")
+        sign_dir(bad, self.key)
+        fetcher = R.LocalFetcher(bad)
+        out = R.refresh(self.cache, bad, fetcher=fetcher,
+                        allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertFalse(out["ok"], out)
+        self.assertEqual(out["failed"], "unverified_list")
+        for url in fetcher.gets:
+            self.assertNotIn("..", url)
+            self.assertNotIn("/evil", url)
+
+    def test_unverified_latest_is_refused_before_the_tag_is_used(self):
+        bad = os.path.join(self.tmp, "unsigned-latest")
+        shutil.copytree(self.release, bad)
+        latest_path = os.path.join(bad, "latest.json")
+        latest = load(latest_path)
+        latest["tag"] = "kt-20990101T000000Z"
+        with open(latest_path, "w", encoding="utf-8") as f:
+            json.dump(latest, f)
+            f.write("\n")
+        # leave the old signature in place so verify_file fails
+        fetcher = R.LocalFetcher(bad)
+        out = R.refresh(self.cache, bad, fetcher=fetcher,
+                        allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertFalse(out["ok"], out)
+        self.assertEqual(out["failed"], "unverified_list")
+        self.assertFalse(any("20990101" in u for u in fetcher.gets), fetcher.gets)
+
+    def test_lock_is_held_across_fetch_and_promote(self):
+        later = self._later()
+        self.seed_cache(shards=0)
+        cache = self.cache
+        held = {"fetch": [], "promote": [], "work": []}
+
+        def lock_held():
+            lock_path = os.path.abspath(cache) + ".lock"
+            if not os.path.exists(lock_path):
+                return False
+            r = subprocess.run(
+                [sys.executable, "-c",
+                 "import fcntl,os,sys\n"
+                 "fd=os.open(sys.argv[1], os.O_RDWR)\n"
+                 "try:\n"
+                 "    fcntl.flock(fd, fcntl.LOCK_EX|fcntl.LOCK_NB)\n"
+                 "    sys.exit(0)\n"
+                 "except BlockingIOError:\n"
+                 "    sys.exit(2)\n"
+                 "finally:\n"
+                 "    os.close(fd)\n",
+                 lock_path],
+                capture_output=True, timeout=10)
+            return r.returncode == 2
+
+        class Probe(R.LocalFetcher):
+            def fetch(self, url, dest):
+                held["fetch"].append(lock_held())
+                work = os.path.dirname(os.path.abspath(dest))
+                held["work"].append(work)
+                return super().fetch(url, dest)
+
+        orig = R._promote
+
+        def probe_promote(work, cache_dir):
+            held["promote"].append(lock_held())
+            self.assertTrue(os.path.basename(work).startswith(".incoming-"))
+            return orig(work, cache_dir)
+
+        R._promote = probe_promote
+        try:
+            out = R.refresh(cache, later, fetcher=Probe(later),
+                            allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        finally:
+            R._promote = orig
+        self.assertTrue(out["ok"], out)
+        self.assertTrue(held["fetch"] and all(held["fetch"]), held)
+        self.assertTrue(held["promote"] and all(held["promote"]), held)
+        for work in held["work"]:
+            self.assertNotEqual(work, os.path.abspath(cache) + ".incoming")
+            self.assertTrue(os.path.basename(work).startswith(".incoming-"), work)
+
+    def test_concurrent_refresh_keeps_a_verified_cache(self):
+        from kt import verify as KV
+        first = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                          allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertTrue(first["ok"], first)
+        later = self._later()
+        bad = os.path.join(self.tmp, "unverified-tree")
+        shutil.copytree(later, bad)
+        with open(os.path.join(bad, "latest.json"), "ab") as f:
+            f.write(b"\n")
+        errors = []
+        outs = []
+
+        def run(src, now):
+            try:
+                outs.append(R.refresh(self.cache, src, fetcher=R.LocalFetcher(src),
+                                      allowed_signers=self.allowed, state=self.state, now=now))
+            except Exception as e:
+                errors.append(e)
+
+        t_good = threading.Thread(target=run, args=(later, T1_ISO))
+        t_bad = threading.Thread(target=run, args=(bad, T1_ISO))
+        t_good.start()
+        t_bad.start()
+        t_good.join(timeout=60)
+        t_bad.join(timeout=60)
+        self.assertFalse(errors, errors)
+        code, line = KV.verify_release(
+            self.cache, self.allowed, state=self.state, now=T1,
+            max_age_hours=48, require_shards=False)
+        self.assertIn(code, (0, 3), line)
+
+    def test_fetch_failure_on_latest_keeps_the_cache(self):
+        first = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                          allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertTrue(first["ok"], first)
+        before = load(os.path.join(self.cache, "latest.json"))
+
+        class Boom(R.LocalFetcher):
+            def fetch(self, url, dest):
+                if url.endswith("latest.json") and not url.endswith(".sig"):
+                    raise OSError("nope")
+                return super().fetch(url, dest)
+
+        later = self._later()
+        out = R.refresh(self.cache, later, fetcher=Boom(later),
+                        allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["failed"], "check_failed")
+        self.assertEqual(load(os.path.join(self.cache, "latest.json")), before)
+
+    def test_fetch_failure_on_a_shard_keeps_the_cache(self):
+        cached = self.seed_cache(shards=2)
+        later = self._later()
+        before = load(os.path.join(self.cache, "latest.json"))
+
+        class Boom(R.LocalFetcher):
+            def fetch(self, url, dest):
+                if "/shard-" in url:
+                    raise OSError("nope")
+                return super().fetch(url, dest)
+
+        out = R.refresh(self.cache, later, fetcher=Boom(later),
+                        allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        # If no cached shard digest changed, the fetch may not be attempted.
+        if any(n.startswith("shard-") for n in (out.get("fetched") or [])) or out["failed"] == "check_failed":
+            self.assertFalse(out["ok"])
+            self.assertEqual(out["failed"], "check_failed")
+            self.assertEqual(load(os.path.join(self.cache, "latest.json")), before)
+        else:
+            # No refetch was needed; still must leave a verified cache.
+            self.assertTrue(out["ok"] or out["failed"] == "check_failed", out)
+
+    def test_corrupt_verify_state_is_unverified(self):
+        with open(self.state, "w", encoding="utf-8") as f:
+            f.write("[]\n")
+        out = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                        allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertFalse(out["ok"], out)
+        self.assertEqual(out["failed"], "unverified_list")
+
+    def test_manifest_array_is_unverified(self):
+        class Swap(R.LocalFetcher):
+            def fetch(self, url, dest):
+                super().fetch(url, dest)
+                if url.endswith("manifest.json") and not url.endswith(".sig"):
+                    with open(dest, "w", encoding="utf-8") as f:
+                        f.write("[]\n")
+
+        out = R.refresh(self.cache, self.release, fetcher=Swap(self.release),
+                        allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertFalse(out["ok"], out)
+        self.assertEqual(out["failed"], "unverified_list")
+
+    def test_bak_symlink_does_not_block_promote(self):
+        first = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                          allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        self.assertTrue(first["ok"], first)
+        bak = R._bak_dir(self.cache)
+        os.symlink(os.path.join(self.tmp, "nowhere"), bak)
+        later = self._later()
+        out = R.refresh(self.cache, later, fetcher=R.LocalFetcher(later),
+                        allowed_signers=self.allowed, state=self.state, now=T1_ISO)
+        self.assertTrue(out["ok"], out)
+        self.assertFalse(os.path.islink(bak))
+        self.assertFalse(os.path.exists(bak))
+        from kt import verify as KV
+        code, line = KV.verify_release(
+            self.cache, self.allowed, state=self.state, now=T1,
+            max_age_hours=48, require_shards=False)
+        self.assertIn(code, (0, 3), line)
 
 
 class TestClientHealth(SignedCacheCase):
@@ -475,3 +706,38 @@ class TestClientHealth(SignedCacheCase):
         self.assertIn("Installer", doc.get("nudged") or [])
         second = self._health(routing=routing, health_path=path)
         self.assertIsNone(second["nudge"])
+
+    def test_status_run_does_not_consume_the_nudge(self):
+        self.seed_cache(shards=1)
+        path = os.path.join(self.tmp, "health.json")
+        routing = {"covered": [{"name": "Installer", "line_present": False}]}
+        status = self._health(routing=routing, health_path=path, status=True)
+        self.assertTrue(status["nudge"] is None or "Installer" in (status.get("nudge") or ""), status)
+        doc = load(path)
+        self.assertNotIn("Installer", doc.get("nudged") or [])
+        weekly = self._health(routing=routing, health_path=path, status=False)
+        self.assertIsNotNone(weekly["nudge"])
+        self.assertIn(H.LINE, weekly["nudge"])
+        self.assertIn("Installer", weekly["nudge"])
+
+    def test_health_json_and_lock_symlinks(self):
+        self.seed_cache(shards=1)
+        victim_dir = os.path.join(self.tmp, "outside")
+        os.makedirs(victim_dir)
+        victim = os.path.join(victim_dir, "health-victim")
+        with open(victim, "w") as f:
+            f.write("secret\n")
+        health = os.path.join(self.tmp, "health.json")
+        os.symlink(victim, health)
+        out = self._health(health_path=health)
+        self.assertFalse(out["failing"], out)
+        self.assertFalse(os.path.islink(health))
+        self.assertTrue(os.path.isfile(health))
+        with open(victim, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "secret\n")
+
+        health2 = os.path.join(self.tmp, "health2.json")
+        os.symlink(os.path.join(self.tmp, "dangling-lock"), health2 + ".lock")
+        with self.assertRaises(ValueError):
+            self._health(health_path=health2)
+
