@@ -119,7 +119,7 @@
       "redistribution": "live metadata lookups are not copied into the list file; do not use PyPI data for spam or to sell personal information",
       "attribution": "none required for a live package-name lookup",
       "key_needed": "none",
-      "rate_limit": "no published numeric edge limit for the JSON or Index APIs (checked 2026-11-27); identify the client with a User-Agent; do not send thousands of requests in a few minutes",
+      "rate_limit": "no published numeric edge limit for the JSON or Index APIs (https://docs.pypi.org/api/, checked 2026-11-27); identify the client with a User-Agent; do not send thousands of requests in a few minutes",
       "terms_url": "https://policies.python.org/pypi.org/Terms-of-Service/"
     },
     {
