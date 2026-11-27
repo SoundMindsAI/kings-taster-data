@@ -38,7 +38,7 @@ each citing its sources and their dates. It never says "safe".
 | A malicious project's own files (lockfile, `.npmrc`, build backend) | Binary-only resolution, `.npmrc` ignored, the default registry set on the command line, nothing ever built. |
 | A phishing link tuned to read clean | A domain under 30 days old, or with no RDAP record, gives Caution. A link with no link-reputation source set up gives Unknown. |
 | Mass false alarms on popular packages | `vulnerable` entries never Block. A malicious entry on a popular name is held at Caution (`pending_review`) until a person approves it, and approval also needs two distinct upstream origins (§7.2). |
-| Poisoning the pipeline | The pipeline uses only deterministic parsers of structured feeds and never copies free text. A circuit breaker holds a build for human review when it makes large changes, hits a popular package name, or carries over a source from the previous release (§7.2). |
+| Poisoning the pipeline | The pipeline uses only deterministic parsers of structured feeds and never copies free text. A circuit breaker holds a build for human review when it adds, removes or withdraws too many entries at once, hits a popular package name, carries over a source from the previous release, or is the very first release (§7.2). |
 | Stolen signing key, repo takeover, rollback | The private key never touches CI. Detached OpenSSH signatures; the current and next public keys are pinned; `generated_at` must only move forward; `revoked_entries` only grows; fixed release-asset URLs; branch protection and CODEOWNERS. |
 | A tampered local checker | The bot records the checker's SHA-256 at approval; if it changes, the bot falls back to checklist mode and asks again. |
 | Stolen API keys | Host allowlist, no redirects, keys read from an environment variable only, and the AI is told never to print them. |
@@ -183,7 +183,7 @@ King's Taster offers this checker at first run, and it is never on by default. T
 online canaries, without ever running a package manager's install or build. Before first use the user sees its
 path, size, SHA-256, the hosts it may contact, the test results and a summary, and approves it. If it fails,
 is missing, changes or crashes, the bot uses checklist mode. It is written by the bot's AI and lives in files
-the user can edit, so it is more reliable than checklist mode, but it is not tamper-proof.
+the user can edit. It is meant to be more consistent than checklist mode, but it is not tamper-proof.
 
 ## 6. Data
 
@@ -215,7 +215,7 @@ Each entry: `id`, `type` (domain, url, ip, hash, package, repo_owner, cve), `val
 ### 6.3 Retirement
 
 An IP entry retires 30 days after its source last listed or updated it, a URL entry after 90 days and a domain
-entry after 180 days. If the source lists it again, the count starts over. Hash, package and CVE entries never
+entry after 180 days. If the source lists or updates it again, the count starts over from that new date. Hash, package and CVE entries never
 retire. A retired entry gives "Caution: previously listed".
 
 ### 6.4 Freshness
