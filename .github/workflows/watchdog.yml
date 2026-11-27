@@ -22,6 +22,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p live
+          rc=0; err="$(gh release view kt-latest --repo "$GITHUB_REPOSITORY" 2>&1 >/dev/null)" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            if printf '%s\n' "$err" | grep -qx 'release not found'; then
+              echo "::notice::No signed release has been published yet; nothing to check."; exit 0
+            fi
+            echo "could not check the live release"; exit 1
+          fi
           gh release download kt-latest --repo "$GITHUB_REPOSITORY" --pattern latest.json --pattern latest.json.sig --dir live
           tag="$(python3 -E -s -c 'import json;print(json.load(open("live/latest.json"))["tag"])')"
           [[ "$tag" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "bad tag"; exit 1; }

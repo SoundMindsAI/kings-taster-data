@@ -9,7 +9,7 @@ import unittest
 
 from kt import verify as KV
 from kt.common import canonical_json, parse_time
-from tests.helpers import REPO, T0, fetch_all, load, make_root, readb, save, tmpdir
+from tests.helpers import REPO, T0, T0_ISO, fetch_all, load, make_root, readb, save, tmpdir
 from kt import build as B
 
 HAVE_SSH = shutil.which("ssh-keygen") is not None
@@ -35,8 +35,9 @@ def sign_dir(d, key, ns="kings-taster"):
                        check=True, capture_output=True, stdin=subprocess.DEVNULL)
 
 
-@unittest.skipUnless(HAVE_SSH, "ssh-keygen not installed")
-class TestVerify(unittest.TestCase):
+class VerifyBase(unittest.TestCase):
+    """Temp keys, a temp repo root and signed releases; no tests of its own (shared with test_qa_fixes)."""
+
     def setUp(self):
         self.tmp = tmpdir(self)
         self.keys = os.path.join(self.tmp, "keys")
@@ -60,6 +61,10 @@ class TestVerify(unittest.TestCase):
     def v(self, d, **kw):
         kw.setdefault("now", T0)
         return KV.verify_release(d, self.allowed, **kw)
+
+
+@unittest.skipUnless(HAVE_SSH, "ssh-keygen not installed")
+class TestVerify(VerifyBase):
 
     def test_current_and_next_key_verify(self):
         self.assertEqual(self.v(self.release("a"))[0], 0)
@@ -109,15 +114,16 @@ class TestVerify(unittest.TestCase):
         a = self.release("a")
         b = self.release("b", now=T0 + __import__("datetime").timedelta(hours=1), prev=a)
         state = os.path.join(self.tmp, "state.json")
-        self.assertEqual(self.v(b, state=state, update_state=True, now=T0)[0], 0)
+        later = T0 + __import__("datetime").timedelta(hours=1)
+        self.assertEqual(self.v(b, state=state, update_state=True, now=later)[0], 0)
         with self.assertRaisesRegex(KV.VerifyError, "rollback"):
-            self.v(a, state=state)
-        self.assertEqual(self.v(b, state=state)[0], 0)  # same file again is fine
+            self.v(a, state=state, now=later)
+        self.assertEqual(self.v(b, state=state, now=later)[0], 0)  # same file again is fine
         st = load(state)
         st["latest_sha256"] = "0" * 64
         save(state, st)
         with self.assertRaisesRegex(KV.VerifyError, "same generated_at but a different file"):
-            self.v(b, state=state)
+            self.v(b, state=state, now=later)
 
     def test_paused_stale_update_required(self):
         save(os.path.join(self.root, "review", "control.json"),
@@ -163,13 +169,13 @@ log = os.environ["STUB_GH_LOG"]
 with open(log, "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\n")
 if sys.argv[1:3] == ["release", "view"]:
-    sys.exit(1)  # no releases yet
+    sys.stderr.write(os.environ.get("STUB_GH_VIEW_ERR", "release not found") + "\n")
+    sys.exit(1)  # no releases yet (or, with STUB_GH_VIEW_ERR, an outage)
 sys.exit(0)
 '''
 
 
-@unittest.skipUnless(HAVE_SSH, "ssh-keygen not installed")
-class TestSignAndRelease(unittest.TestCase):
+class SignAndReleaseBase(unittest.TestCase):
     """Runs scripts/sign-and-release.sh against a temp copy of the repo with a throwaway key and a stub gh."""
 
     def setUp(self):
@@ -196,11 +202,15 @@ class TestSignAndRelease(unittest.TestCase):
 
     def run_script(self, *args, key=None, env_extra=None):
         env = {"PATH": os.environ["PATH"], "HOME": self.tmp, "KT_GH": self.gh, "STUB_GH_LOG": self.log,
-               "KT_SIGNING_KEY_PATH": key or self.key}
+               "KT_SIGNING_KEY_PATH": key or self.key, "KT_NOW": T0_ISO}
         env.update(env_extra or {})
         p = subprocess.run(["bash", os.path.join(self.repo, "scripts", "sign-and-release.sh")] + list(args),
                            capture_output=True, text=True, env=env, timeout=120)
         return p.returncode, p.stdout + p.stderr
+
+
+@unittest.skipUnless(HAVE_SSH, "ssh-keygen not installed")
+class TestSignAndRelease(SignAndReleaseBase):
 
     def test_breaker_blocks_without_accept(self):
         rc, out = self.run_script("--from-dir", self.unsigned, "--dry-run")

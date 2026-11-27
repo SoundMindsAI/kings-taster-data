@@ -57,16 +57,16 @@ def canonical_json(obj):
 
 # ---- names and values -------------------------------------------------------
 
-NPM_NAME = re.compile(r"^(?:@[a-z0-9~-][a-z0-9._~-]*/)?[a-z0-9~-][a-z0-9._~-]*$")
-NPM_LEGACY_NAME = re.compile(r"^(?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*$")
-PEP508_NAME = re.compile(r"^([A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])$", re.IGNORECASE)
-VERSION = re.compile(r"^[A-Za-z0-9.+_!~-]{1,64}$")
-CVE_ID = re.compile(r"^CVE-\d{4}-\d{4,8}$")
-MAL_ID = re.compile(r"^MAL-\d{4}-\d{1,8}$")
-ALIAS_ID = re.compile(r"^(CVE-\d{4}-\d{4,8}|GHSA(-[23456789cfghjmpqrvwx]{4}){3}|PYSEC-\d{4}-\d{1,8}|MAL-\d{4}-\d{1,8}|OSV-\d{4}-\d{1,8})$")
-ORIGIN_SOURCE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,40}$")
+NPM_NAME = re.compile(r"^(?:@[a-z0-9~-][a-z0-9._~-]*/)?[a-z0-9~-][a-z0-9._~-]*\Z")
+NPM_LEGACY_NAME = re.compile(r"^(?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*\Z")
+PEP508_NAME = re.compile(r"^([A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])\Z", re.IGNORECASE)
+VERSION = re.compile(r"^[A-Za-z0-9.+_!~-]{1,64}\Z")
+CVE_ID = re.compile(r"^CVE-\d{4}-\d{4,8}\Z")
+MAL_ID = re.compile(r"^MAL-\d{4}-\d{1,8}\Z")
+ALIAS_ID = re.compile(r"^(CVE-\d{4}-\d{4,8}|GHSA(-[23456789cfghjmpqrvwx]{4}){3}|PYSEC-\d{4}-\d{1,8}|MAL-\d{4}-\d{1,8}|OSV-\d{4}-\d{1,8})\Z")
+ORIGIN_SOURCE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,40}\Z")
 # Short labels such as KEV vendor/product: letters (any script), digits, limited punctuation.
-SHORT_LABEL = re.compile(r"^(?!_)[\w.][\w .,&()+/'’:!–-]{0,119}$", re.UNICODE)
+SHORT_LABEL = re.compile(r"^(?!_)[\w.][\w .,&()+/'’:!–-]{0,119}\Z", re.UNICODE)
 _SPACES = re.compile(r"[\s\u00a0\u2000-\u200b\u202f\u205f\u3000]+")
 
 
@@ -128,7 +128,7 @@ def defang(ioc_type, value, ecosystem=None):
     if ioc_type in ("domain", "ip"):
         return value.replace(".", "[.]")
     if ioc_type == "url":
-        m = re.match(r"^(https?)://([^/?#]*)(.*)$", value, re.IGNORECASE)
+        m = re.match(r"^(https?)://([^/?#]*)(.*)\Z", value, re.IGNORECASE)
         if not m:
             raise ValueError("bad url")
         scheme = "hxxps" if m.group(1).lower() == "https" else "hxxp"
@@ -202,6 +202,33 @@ def write_json(path, obj):
     os.replace(tmp, path)
 
 
+class DuplicateKeyError(ValueError):
+    pass
+
+
+def _no_dup_pairs(pairs):
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise DuplicateKeyError("duplicate JSON key")
+        d[k] = v
+    return d
+
+
+def _no_constants(name):
+    raise ValueError("NaN/Infinity are not JSON")
+
+
+def loads_strict(data):
+    """Parse JSON bytes/str, refusing duplicate keys, NaN/Infinity and absurd nesting (ValueError)."""
+    if isinstance(data, bytes):
+        data = data.decode("utf-8")
+    try:
+        return json.loads(data, object_pairs_hook=_no_dup_pairs, parse_constant=_no_constants)
+    except RecursionError:
+        raise ValueError("JSON nested too deeply") from None
+
+
 def read_json(path):
     with open(path, "rb") as f:
-        return json.loads(f.read().decode("utf-8"))
+        return loads_strict(f.read())

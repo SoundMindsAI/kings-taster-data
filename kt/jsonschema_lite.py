@@ -6,6 +6,10 @@ additionalProperties (bool or schema), items, minItems, maxItems,
 uniqueItems, allOf, anyOf, oneOf, not, if/then/else.
 Unknown keywords that affect validation raise, so the schema files can't
 silently use something this evaluator ignores.
+
+Patterns are anchored strictly: an unescaped `$` outside a character class is
+evaluated as `\\Z`, so a trailing newline never satisfies a pattern (Python's `$`
+also matches just before a final newline).
 """
 import re
 
@@ -30,6 +34,43 @@ _TYPES = {
 
 class SchemaError(Exception):
     pass
+
+
+_PATTERN_CACHE = {}
+_SAFE_KEY = re.compile(r"[A-Za-z0-9_]{1,64}\Z")
+
+
+def _strict(pattern):
+    """Compile a schema pattern with every end-of-string `$` turned into `\\Z`."""
+    c = _PATTERN_CACHE.get(pattern)
+    if c is None:
+        out, i, in_class = [], 0, False
+        while i < len(pattern):
+            ch = pattern[i]
+            if ch == "\\" and i + 1 < len(pattern):
+                out.append(pattern[i:i + 2])
+                i += 2
+                continue
+            if in_class:
+                if ch == "]":
+                    in_class = False
+            elif ch == "[":
+                in_class = True
+                if pattern[i + 1:i + 2] == "]":
+                    out.append("[]")
+                    i += 2
+                    continue
+            elif ch == "$":
+                ch = "\\Z"
+            out.append(ch)
+            i += 1
+        c = _PATTERN_CACHE[pattern] = re.compile("".join(out))
+    return c
+
+
+def _key_label(key):
+    """Field names are echoed in errors only when they are plain identifiers (never attacker text)."""
+    return key if isinstance(key, str) and _SAFE_KEY.match(key) else "<field>"
 
 
 def _resolve(root, ref):
@@ -63,7 +104,7 @@ def validate(instance, schema, root=None, path="$"):
     if "const" in schema and instance != schema["const"]:
         errors.append("%s: value must be %r" % (path, schema["const"]))
     if isinstance(instance, str):
-        if "pattern" in schema and not re.search(schema["pattern"], instance):
+        if "pattern" in schema and not _strict(schema["pattern"]).search(instance):
             errors.append("%s: does not match pattern" % path)
         if "minLength" in schema and len(instance) < schema["minLength"]:
             errors.append("%s: too short" % path)
@@ -81,7 +122,7 @@ def validate(instance, schema, root=None, path="$"):
         props = schema.get("properties", {})
         addl = schema.get("additionalProperties", True)
         for key, val in instance.items():
-            sub = "%s.%s" % (path, key)
+            sub = "%s.%s" % (path, _key_label(key))
             if key in props:
                 errors += validate(val, props[key], root, sub)
             elif addl is False:

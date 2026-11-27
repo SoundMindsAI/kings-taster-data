@@ -17,15 +17,15 @@ import shutil
 import subprocess
 import sys
 
-from .common import parse_time, sha256_file, utc_now, write_json, read_json
-from .validate import RELEASE_FILES, validate_latest
+from .common import loads_strict, parse_time, sha256_file, utc_now, write_json, read_json
+from .validate import RELEASE_FILES, check_not_future, validate_latest
 
 NAMESPACE = "kings-taster"
 PRINCIPALS = ("kings-taster-current", "kings-taster-next")
 SIGNER_LINE = re.compile(
     r'^(kings-taster-current|kings-taster-next) '
     r'((?:valid-after="\d{8}(?:\d{4,6})?Z?",)?(?:valid-before="\d{8}(?:\d{4,6})?Z?",)?)?'
-    r'namespaces="kings-taster" ssh-ed25519 [A-Za-z0-9+/]{68}(?:==|=)?(?: [A-Za-z0-9@._-]{0,64})?$')
+    r'namespaces="kings-taster" ssh-ed25519 [A-Za-z0-9+/]{68}(?:==|=)?(?: [A-Za-z0-9@._-]{0,64})?\Z')
 FILES = ("latest.json",) + RELEASE_FILES
 
 
@@ -61,6 +61,10 @@ def verify_file(path, allowed):
     sig = path + ".sig"
     if not os.path.exists(sig):
         raise VerifyError("%s: signature missing" % os.path.basename(path))
+    with open(sig, "rb") as f:
+        sig_bytes = f.read(65536)
+    if sig_bytes.count(b"-----BEGIN SSH SIGNATURE-----") != 1 or sig_bytes.count(b"-----END SSH SIGNATURE-----") != 1:
+        raise VerifyError("%s: signature file must hold exactly one signature" % os.path.basename(path))
     exe = _ssh_keygen()
     fp = subprocess.run([exe, "-Y", "find-principals", "-s", sig, "-f", allowed, "-n", NAMESPACE],
                         capture_output=True, text=True, timeout=30)
@@ -80,28 +84,36 @@ def verify_release(d, allowed, state=None, update_state=False, template_version=
                    max_age_hours=48):
     check_allowed_signers(allowed)
     signers = {name: verify_file(os.path.join(d, name), allowed) for name in FILES}
+    with open(os.path.join(d, "latest.json"), "rb") as f:
+        raw = f.read()
     try:
-        latest = read_json(os.path.join(d, "latest.json"))
+        latest = loads_strict(raw)
     except ValueError:
-        raise VerifyError("latest.json is not JSON")
-    if latest.get("file_type") != "latest":
+        raise VerifyError("latest.json is not JSON or has duplicate keys")
+    if not isinstance(latest, dict) or latest.get("file_type") != "latest":
         raise VerifyError("latest.json has the wrong file_type")
-    errs = validate_latest(latest, d)
+    errs = validate_latest(latest, d, raw=raw)
     if errs:
         raise VerifyError("latest.json check failed: " + errs[0])
     for name, ft in (("iocs.json", "iocs"), ("conformance.json", "conformance"), ("stats.json", "stats")):
-        if read_json(os.path.join(d, name)).get("file_type") != ft:
+        doc = read_json(os.path.join(d, name))
+        if not isinstance(doc, dict) or doc.get("file_type") != ft:
             raise VerifyError("%s has the wrong file_type" % name)
+    now = now or utc_now()
+    errs = check_not_future(latest["generated_at"], now)
+    if errs:
+        raise VerifyError(errs[0])
     gen = parse_time(latest["generated_at"])
     sha = sha256_file(os.path.join(d, "latest.json"))
     if state and os.path.exists(state):
         st = read_json(state)
+        if not isinstance(st, dict) or not isinstance(st.get("generated_at"), str):
+            raise VerifyError("state file is not valid")
         last = parse_time(st["generated_at"])
         if gen < last:
             raise VerifyError("rollback: generated_at is older than the last accepted file")
         if gen == last and st.get("latest_sha256") != sha:
             raise VerifyError("rollback: same generated_at but a different file")
-    now = now or utc_now()
     if template_version:
         tv = tuple(int(x) for x in template_version.split("."))
         if tv < tuple(int(x) for x in latest["min_template_version"].split(".")):
@@ -132,6 +144,9 @@ def main(argv=None):
                                     parse_time(a.now) if a.now else None, a.max_age_hours)
     except (VerifyError, OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
         print("UNVERIFIED: %s" % str(e)[:300])
+        return 1
+    except Exception as e:  # fail closed with the same one-line format for any odd signed input
+        print("UNVERIFIED: unexpected %s while checking the release" % type(e).__name__)
         return 1
     print(line)
     return code

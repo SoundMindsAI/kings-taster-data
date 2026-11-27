@@ -24,6 +24,16 @@ FILES=(latest.json iocs.json conformance.json stats.json)
 
 RUN_ID="" FROM_DIR="" KEY="${KT_SIGNING_KEY_PATH:-}" ACCEPT_BREAKER=0 BOOTSTRAP=0 DRY_RUN=0
 die() { echo "sign-and-release: REFUSED: $*" >&2; exit 1; }
+
+# Prints "present" or "absent". Only gh's explicit "release not found" counts as absent; any other failure
+# (network, auth, 5xx) returns 1 so the caller refuses instead of treating the live release as missing.
+release_state() {
+  local err rc=0
+  err="$("$GH" release view "$1" --repo "$REPO" 2>&1 >/dev/null)" || rc=$?
+  if [ "$rc" -eq 0 ]; then echo present; return 0; fi
+  if printf '%s\n' "$err" | grep -qx 'release not found'; then echo absent; return 0; fi
+  return 1
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     --run-id) RUN_ID="${2:?}"; shift 2 ;;
@@ -54,6 +64,9 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 ART="$WORK/art"; PREV="$WORK/prev"; mkdir -p "$ART" "$PREV"
 PY=(python3 -E -s)
+# Tests only: KT_NOW pins the clock used for the "not dated in the future" checks.
+NOW_ARGS=()
+if [ -n "${KT_NOW:-}" ]; then NOW_ARGS=(--now "$KT_NOW"); fi
 cd "$ROOT"
 
 # 1. Get the unsigned artifact.
@@ -76,27 +89,28 @@ for f in "$ART"/*; do
 done
 
 # 2. Validate the unsigned files.
-"${PY[@]}" -m kt.validate "$ART" >/dev/null || { "${PY[@]}" -m kt.validate "$ART" | head -20 >&2 || true; die "artifact failed validation"; }
+"${PY[@]}" -m kt.validate "$ART" "${NOW_ARGS[@]}" >/dev/null || { "${PY[@]}" -m kt.validate "$ART" "${NOW_ARGS[@]}" | head -20 >&2 || true; die "artifact failed validation"; }
 TAG="$("${PY[@]}" -c 'import json,sys;print(json.load(open(sys.argv[1]))["tag"])' "$ART/latest.json")"
 [[ "$TAG" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || die "bad tag"
 
 # 3. Compare with the live release: verify its signature, then require monotonic generated_at.
 HAVE_PREV=0
 if [ "$DRY_RUN" -eq 0 ] || [ -n "$RUN_ID" ]; then
-  if "$GH" release view "$POINTER_TAG" --repo "$REPO" >/dev/null 2>&1; then
+  PSTATE="$(release_state "$POINTER_TAG")" || die "could not check the live release (gh failed); not treating it as absent"
+  if [ "$PSTATE" = present ]; then
     "$GH" release download "$POINTER_TAG" --repo "$REPO" --pattern 'latest.json' --pattern 'latest.json.sig' --dir "$PREV"
     PTAG="$("${PY[@]}" -c 'import json,sys;print(json.load(open(sys.argv[1]))["tag"])' "$PREV/latest.json")"
     [[ "$PTAG" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || die "live pointer has a bad tag"
     for f in iocs.json conformance.json stats.json; do
       "$GH" release download "$PTAG" --repo "$REPO" --pattern "$f" --pattern "$f.sig" --dir "$PREV"
     done
-    "${PY[@]}" -m kt.verify "$PREV" --allowed-signers "$ALLOWED" --max-age-hours 87600 >/dev/null \
+    "${PY[@]}" -m kt.verify "$PREV" --allowed-signers "$ALLOWED" --max-age-hours 87600 "${NOW_ARGS[@]}" >/dev/null \
       || [ $? -eq 3 ] || die "the live release does not verify; fix that first"
     HAVE_PREV=1
   fi
 fi
 if [ "$HAVE_PREV" -eq 1 ]; then
-  "${PY[@]}" -m kt.validate "$ART" --previous "$PREV" >/dev/null || die "not newer than the live release, or a revocation was dropped (rollback refused)"
+  "${PY[@]}" -m kt.validate "$ART" --previous "$PREV" "${NOW_ARGS[@]}" >/dev/null || die "not newer than the live release, or a revocation was dropped (rollback refused)"
   "${PY[@]}" -c 'import json,sys
 r=json.load(open(sys.argv[1])); p=json.load(open(sys.argv[2]))
 sys.exit(0 if r.get("previous_generated_at")==p["generated_at"] else 1)' "$ART/build-report.json" "$PREV/iocs.json" \
@@ -117,7 +131,7 @@ for f in "${FILES[@]}"; do
   [ ! -e "$ART/$f.sig" ] || die "unexpected existing signature"
   ssh-keygen -Y sign -q -f "$KEY" -n "$NS" "$ART/$f" </dev/null || die "signing failed"
 done
-"${PY[@]}" -m kt.verify "$ART" --allowed-signers "$ALLOWED" --max-age-hours 87600 >/dev/null || [ $? -eq 3 ] \
+"${PY[@]}" -m kt.verify "$ART" --allowed-signers "$ALLOWED" --max-age-hours 87600 "${NOW_ARGS[@]}" >/dev/null || [ $? -eq 3 ] \
   || die "our own signatures did not verify"
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -142,7 +156,8 @@ assets=()
 for f in "${FILES[@]}"; do assets+=("$ART/$f" "$ART/$f.sig"); done
 "$GH" release create "$TAG" "${assets[@]}" "$ART/LICENSES.md" "$ART/Apache-2.0.txt" \
   --repo "$REPO" --target main --title "$TAG" --notes-file "$NOTES" --latest=false
-if "$GH" release view "$POINTER_TAG" --repo "$REPO" >/dev/null 2>&1; then
+PSTATE="$(release_state "$POINTER_TAG")" || die "could not check the pointer release (gh failed) after creating $TAG; move $POINTER_TAG by hand"
+if [ "$PSTATE" = present ]; then
   "$GH" release upload "$POINTER_TAG" "$ART/latest.json" "$ART/latest.json.sig" --repo "$REPO" --clobber
 else
   "$GH" release create "$POINTER_TAG" "$ART/latest.json" "$ART/latest.json.sig" --repo "$REPO" --target main \

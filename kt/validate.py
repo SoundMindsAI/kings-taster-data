@@ -11,7 +11,8 @@ import re
 import sys
 
 from . import jsonschema_lite
-from .common import canonical_json, match_key, normalize_package, parse_time, sha256_bytes, ECO_PREFIX
+from .common import (canonical_json, loads_strict, match_key, normalize_package, parse_time, read_json,
+                     sha256_bytes, utc_now, ECO_PREFIX)
 from .finding import RESULT_RANK, UNKNOWN_REASONS, CAUTION_REASONS, BLOCK_REASONS
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -158,10 +159,25 @@ def validate_conformance(doc):
     return errors
 
 
-def validate_latest(latest, release_dir):
+FUTURE_SKEW_SECONDS = 300  # a signed file dated more than 5 minutes ahead is refused (rollback-state poisoning)
+
+
+def check_not_future(generated_at, now=None):
+    now = now or utc_now()
+    if (parse_time(generated_at) - now).total_seconds() > FUTURE_SKEW_SECONDS:
+        return ["latest: generated_at is in the future"]
+    return []
+
+
+def validate_latest(latest, release_dir, raw=None):
+    """raw: the exact latest.json bytes; when given they must be the canonical form (no duplicate keys)."""
+    if not isinstance(latest, dict):
+        return ["latest: not a JSON object"]
     errors = jsonschema_lite.validate(latest, _schema("latest"))
     if errors:
         return errors
+    if raw is not None and raw != canonical_json(latest):
+        errors.append("latest: latest.json is not in canonical form")
     if latest["release_base_url"] != "https://github.com/SoundMindsAI/kings-taster-data/releases/download/%s/" % latest["tag"]:
         errors.append("latest: release_base_url doesn't match tag")
     for name in RELEASE_FILES:
@@ -173,9 +189,11 @@ def validate_latest(latest, release_dir):
         if sha256_bytes(b) != latest["assets"][name]["sha256"] or len(b) != latest["assets"][name]["bytes"]:
             errors.append("latest: %s hash/size mismatch" % name)
         try:
-            d = json.loads(b.decode("utf-8"))
+            d = loads_strict(b)
         except ValueError:
-            errors.append("latest: %s not JSON" % name); continue
+            errors.append("latest: %s not JSON or has duplicate keys" % name); continue
+        if not isinstance(d, dict):
+            errors.append("latest: %s is not a JSON object" % name); continue
         if d.get("generated_at") != latest["generated_at"] or d.get("tag") != latest["tag"]:
             errors.append("latest: %s generated_at/tag differ from latest.json" % name)
         if b != canonical_json(d):
@@ -199,16 +217,20 @@ def check_monotonic(prev_iocs, new_iocs):
     return errors
 
 
-def validate_release_dir(d, previous_dir=None, fast_entries=True):
+def validate_release_dir(d, previous_dir=None, fast_entries=True, now=None):
     errors = []
-    docs = {}
+    docs, raws = {}, {}
     for name in RELEASE_FILES + ("latest.json",):
         p = os.path.join(d, name)
         try:
             with open(p, "rb") as f:
-                docs[name] = json.loads(f.read().decode("utf-8"))
+                raws[name] = f.read()
+            docs[name] = loads_strict(raws[name])
         except (OSError, ValueError):
-            errors.append("%s: missing or not JSON" % name)
+            errors.append("%s: missing, not JSON, or has duplicate keys" % name)
+            continue
+        if not isinstance(docs[name], dict):
+            errors.append("%s: not a JSON object" % name)
     if errors:
         return errors
     for name, ft in (("iocs.json", "iocs"), ("conformance.json", "conformance"), ("stats.json", "stats"),
@@ -218,12 +240,13 @@ def validate_release_dir(d, previous_dir=None, fast_entries=True):
     errors += ["iocs.json: " + e for e in validate_iocs(docs["iocs.json"], fast_entries)]
     errors += ["stats.json: " + e for e in validate_stats(docs["stats.json"])]
     errors += ["conformance.json: " + e for e in validate_conformance(docs["conformance.json"])]
-    errors += validate_latest(docs["latest.json"], d)
+    errors += validate_latest(docs["latest.json"], d, raw=raws["latest.json"])
+    if not errors:
+        errors += check_not_future(docs["latest.json"]["generated_at"], now)
     if docs["latest.json"].get("paused") != docs["iocs.json"].get("paused"):
         errors.append("latest/iocs paused flags differ")
     if previous_dir:
-        with open(os.path.join(previous_dir, "iocs.json"), "rb") as f:
-            prev = json.loads(f.read().decode("utf-8"))
+        prev = read_json(os.path.join(previous_dir, "iocs.json"))
         errors += check_monotonic(prev, docs["iocs.json"])
     return errors
 
@@ -232,8 +255,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("dir")
     ap.add_argument("--previous")
+    ap.add_argument("--now", help="ISO time to judge 'not in the future' against (default: now)")
     a = ap.parse_args(argv)
-    errs = validate_release_dir(a.dir, a.previous)
+    try:
+        errs = validate_release_dir(a.dir, a.previous, now=parse_time(a.now) if a.now else None)
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as e:
+        errs = ["unexpected %s while validating" % type(e).__name__]
     if errs:
         print("INVALID: %d problem(s)" % len(errs))
         for e in errs[:100]:

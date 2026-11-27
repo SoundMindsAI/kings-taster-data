@@ -25,7 +25,7 @@ class BuildCase(unittest.TestCase):
 class TestBootstrapAndChain(BuildCase):
     def test_bootstrap_valid_and_needs_human(self):
         out, r = self.build(fetch_all(self.tmp, self.root), "r1")
-        self.assertEqual(V.validate_release_dir(out, fast_entries=False), [])
+        self.assertEqual(V.validate_release_dir(out, fast_entries=False, now=T0), [])
         self.assertTrue(r["needs_human"])
         self.assertIn("bootstrap_first_release", r["breaker"])
         iocs = load(os.path.join(out, "iocs.json"))
@@ -49,7 +49,7 @@ class TestBootstrapAndChain(BuildCase):
         extra = {"MAL-2026-90100.json": mal_record("MAL-2026-90100", "npm", "kt-new-pkg", published="2026-11-27T20:00:00Z")}
         src2 = fetch_all(self.tmp, self.root, npm_extra=extra)
         out2, r2 = self.build(src2, "r2", prev=out1, now=T0 + H)
-        self.assertEqual(V.validate_release_dir(out2, previous_dir=out1), [])
+        self.assertEqual(V.validate_release_dir(out2, previous_dir=out1, now=T0 + H), [])
         self.assertEqual(r2["added"], 1)
         self.assertFalse(r2["needs_human"], r2["breaker"])
         e1 = {e["id"]: e for e in load(os.path.join(out1, "iocs.json"))["entries"]}
@@ -74,7 +74,7 @@ class TestBootstrapAndChain(BuildCase):
         src = fetch_all(self.tmp, self.root)
         out1, _ = self.build(src, "r1")
         out2, _ = self.build(src, "r2", prev=out1, now=T0 + H)
-        errs = V.validate_release_dir(out1, previous_dir=out2)
+        errs = V.validate_release_dir(out1, previous_dir=out2, now=T0)
         self.assertTrue(any("generated_at is not newer" in e for e in errs))
 
 
@@ -225,7 +225,7 @@ class TestOutputs(BuildCase):
         from kt.common import canonical_json
         with open(p, "wb") as f:
             f.write(canonical_json(d))
-        self.assertTrue(any("hash/size mismatch" in e for e in V.validate_release_dir(out)))
+        self.assertTrue(any("hash/size mismatch" in e for e in V.validate_release_dir(out, now=T0)))
 
     def test_injected_list_value_rejected(self):
         out, _ = self.build(fetch_all(self.tmp, self.root), "r1")

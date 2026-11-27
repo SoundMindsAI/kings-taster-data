@@ -7,9 +7,11 @@ import json
 import os
 import re
 import sys
+import unicodedata
+from urllib.parse import unquote, urlsplit
 
 from . import jsonschema_lite
-from .common import parse_time
+from .common import loads_strict, parse_time
 
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "schema", "finding-record.schema.json")
 
@@ -38,10 +40,45 @@ WORDING_PREFIX = {"block": "Block.", "caution": "Caution.", "unknown": "Unknown.
 URL_IN_TEXT = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
 EXPLANATION_URL_HOSTS = {"osv.dev", "www.cisa.gov", "github.com", "transparencyreport.google.com",
                          "safebrowsing.google.com"}
+# On github.com only advisories and this repo count as official source links.
+GITHUB_OFFICIAL_PATHS = ("/advisories", "/SoundMindsAI/kings-taster-data/")
+# The one fixed No-known-reports form (SPEC.md §3.1): every source carries its own date.
+NKR_FORM = re.compile(r"No known reports\. Checked against [^()\n]{1,80} \(\d{4}-\d{2}-\d{2}\)"
+                      r"(?:, [^()\n]{1,80} \(\d{4}-\d{2}-\d{2}\))* on \d{4}-\d{2}-\d{2}\.\Z")
+INVISIBLE = re.compile("[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f"
+                       "\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0]")
 
-PKG_IND = re.compile(r"^(npm|pypi):((?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*)(@[A-Za-z0-9.+_!~-]{1,64})?$")
-REPO_IND = re.compile(r"^github:[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")
-LINK_IND = re.compile(r"^hxxps?://[^/?#\s]+(?:[/?#][\x21-\x7e]*)?$")
+
+def _normalize_text(s):
+    """NFKC-fold (fullwidth, ligatures) and drop invisible characters before word tests."""
+    return INVISIBLE.sub("", unicodedata.normalize("NFKC", s))
+
+
+def official_url_problem(url, allowed_hosts):
+    """None if url is a plain https link on an allowed host with no dot or empty path segments."""
+    if "\\" in url or re.search(r"%2e|%2f|%5c", url, re.IGNORECASE):
+        return "encoded dot, slash or backslash"
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "unparsable"
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https" or host not in allowed_hosts or parts.port or parts.username or parts.password:
+        return "not an official https host"
+    path = parts.path
+    decoded = path
+    for _ in range(3):
+        decoded = unquote(decoded)
+    segs = decoded.split("/")[1:]
+    if any(s in (".", "..") for s in segs) or "" in segs[:-1]:
+        return "dot or empty path segment"
+    if host == "github.com" and not (decoded == "/advisories" or decoded.startswith(("/advisories/",) + GITHUB_OFFICIAL_PATHS[1:])):
+        return "github.com link outside advisories and the kings-taster-data repo"
+    return None
+
+PKG_IND = re.compile(r"^(npm|pypi):((?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*)(@[A-Za-z0-9.+_!~-]{1,64})?\Z")
+REPO_IND = re.compile(r"^github:[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}\Z")
+LINK_IND = re.compile(r"^hxxps?://[^/?#\s]+(?:[/?#][\x21-\x7e]*)?\Z")
 
 
 def _load_schema():
@@ -151,6 +188,9 @@ def check_rules(rec):
             errors.append("result: no_known_reports needs every required source ok")
 
     # R4: matches.
+    for m in rec["matched_entries"]:
+        if official_url_problem(m["source_url"], EXPLANATION_URL_HOSTS):
+            errors.append("matched_entries.source_url: not a plain official source link")
     if (result == "block" or reasons & {"vulnerable_version", "retired_entry", "pending_review"}) and not rec["matched_entries"]:
         errors.append("matched_entries: needed for block, vulnerable_version, retired_entry and pending_review")
     if "vulnerable_version" in reasons and rec["fixed_version"] is None:
@@ -168,20 +208,28 @@ def check_rules(rec):
     exp = rec["explanation"]
     if not exp.startswith(WORDING_PREFIX[result]):
         errors.append("explanation: must start with %r (SPEC.md §3.1 wording)" % WORDING_PREFIX[result])
-    stripped = exp.replace(GOOGLE_NOTICE, "")
+    if result == "no_known_reports" and not NKR_FORM.match(exp):
+        errors.append("explanation: must be 'No known reports. Checked against <source> (<date>), ... on <date>.'")
+    if INVISIBLE.search(exp) or unicodedata.normalize("NFKC", exp) != exp:
+        errors.append("explanation: contains invisible or compatibility characters")
+    stripped = _normalize_text(exp).replace(GOOGLE_NOTICE, "")
     if BANNED.search(stripped):
         errors.append("explanation: uses a banned word (safe / guarantee)")
     sb_ok = by_src.get("safe_browsing", {}).get("status") == "ok"
     if GOOGLE_ATTRIBUTION in exp and not sb_ok:
         errors.append("explanation: Google attribution only allowed when Safe Browsing was used")
     for u in URL_IN_TEXT.findall(exp):
-        host = re.match(r"https?://([^/?#:]+)", u, re.IGNORECASE)
-        if not host or host.group(1).lower() not in EXPLANATION_URL_HOSTS:
+        if official_url_problem(u.rstrip(".,;:"), EXPLANATION_URL_HOSTS):
             errors.append("explanation: contains a URL that is not an official source link")
+            break
     if rec["item_type"] == "link":
         live = _refang(rec["indicator_defanged"])
-        if live.lower() in exp.lower():
+        norm = _normalize_text(exp).lower()
+        host = re.match(r"^https?://([^/?#]+)", live)
+        if live.lower() in norm:
             errors.append("explanation: contains the live (refanged) indicator")
+        elif host and host.group(1).lower() in norm:
+            errors.append("explanation: contains the live (refanged) host")
     if re.search(r"[\x00-\x08\x0b-\x1f\x7f]", exp):
         errors.append("explanation: contains control characters")
     return errors
@@ -204,12 +252,15 @@ def main(argv):
     for path in argv:
         try:
             with open(path, "rb") as f:
-                rec = json.loads(f.read().decode("utf-8"))
-        except (OSError, ValueError) as e:
+                rec = loads_strict(f.read())
+        except (OSError, ValueError, RecursionError) as e:
             print("INVALID %s: unreadable (%s)" % (path, type(e).__name__))
             bad += 1
             continue
-        errs = validate_record(rec, schema)
+        try:
+            errs = validate_record(rec, schema)
+        except RecursionError:
+            errs = ["record nested too deeply"]
         if errs:
             bad += 1
             print("INVALID %s: %d problem(s)" % (path, len(errs)))

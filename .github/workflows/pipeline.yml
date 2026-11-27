@@ -49,7 +49,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work/prev
-          if gh release view kt-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          rc=0; err="$(gh release view kt-latest --repo "$GITHUB_REPOSITORY" 2>&1 >/dev/null)" || rc=$?
+          if [ "$rc" -ne 0 ] && ! printf '%s\n' "$err" | grep -qx 'release not found'; then
+            echo "could not check the live release; not treating it as absent"; exit 1
+          fi
+          if [ "$rc" -eq 0 ]; then
             gh release download kt-latest --repo "$GITHUB_REPOSITORY" --pattern latest.json --pattern latest.json.sig --dir work/prev
             tag="$(python3 -E -s -c 'import json;print(json.load(open("work/prev/latest.json"))["tag"])')"
             [[ "$tag" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "bad previous tag"; exit 1; }

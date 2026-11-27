@@ -87,3 +87,4 @@ def fetch_all(tmp, root, npm_extra=None, pypi_extra=None, kev_path=None, npm_ski
 
 
 T0 = dt.datetime(2026, 11, 27, 6, 17, 0, tzinfo=dt.timezone.utc)
+T0_ISO = "2026-11-27T06:17:00Z"
