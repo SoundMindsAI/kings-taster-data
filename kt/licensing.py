@@ -2,6 +2,7 @@
 import json
 import os
 import re
+from datetime import date
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 TABLE = os.path.join(ROOT, "sources", "licensing.json")
@@ -16,6 +17,21 @@ LIST_FETCHER_IDS = {
 }
 
 
+
+def _is_calendar_date(val):
+    """True if val is an ASCII YYYY-MM-DD calendar date (impossible days are refused)."""
+    if not isinstance(val, str):
+        return False
+    m = re.fullmatch(r"([0-9]{4})-([0-9]{2})-([0-9]{2})", val)
+    if not m:
+        return False
+    try:
+        date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return False
+    return True
+
+
 def load_table(path=None):
     with open(path or TABLE, encoding="utf-8") as f:
         doc = json.load(f)
@@ -27,10 +43,10 @@ def load_table(path=None):
 def problems(doc):
     """Return a list of problems in the table. An empty list means the table is well-formed."""
     errors = []
-    if "checked_on" in doc:
-        val = doc["checked_on"]
-        if not isinstance(val, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", val):
-            errors.append("checked_on must be a YYYY-MM-DD date")
+    if "checked_on" not in doc:
+        errors.append("checked_on is required")
+    elif not _is_calendar_date(doc["checked_on"]):
+        errors.append("checked_on must be a YYYY-MM-DD date")
     seen = set()
     for i, row in enumerate(doc.get("sources") or []):
         if not isinstance(row, dict):

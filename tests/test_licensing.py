@@ -70,3 +70,23 @@ class TestLicensingTable(unittest.TestCase):
             self.assertTrue(any("checked_on" in e for e in errs),
                             "checked_on=%r should be refused, got %r" % (bad, errs))
 
+
+    def test_checked_on_impossible_dates_refused(self):
+        for bad in ("2026-99-99", "2026-02-30"):
+            doc = dict(self.doc)
+            doc["checked_on"] = bad
+            errs = L.problems(doc)
+            self.assertTrue(any("checked_on" in e for e in errs),
+                            "checked_on=%r should be refused, got %r" % (bad, errs))
+
+    def test_checked_on_missing_key_refused(self):
+        doc = dict(self.doc)
+        del doc["checked_on"]
+        errs = L.problems(doc)
+        self.assertTrue(any("checked_on" in e for e in errs),
+                        "missing checked_on should be refused, got %r" % (errs,))
+
+    def test_pypi_rate_limit_cites_api_docs(self):
+        row = next(s for s in self.doc["sources"] if s["id"] == "pypi-registry")
+        self.assertIn("https://docs.pypi.org/api/", row["rate_limit"])
+        self.assertIn("https://docs.pypi.org/api/", self.md)
