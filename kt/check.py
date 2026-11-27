@@ -262,12 +262,14 @@ def is_popular(ecosystem, name, root=None):
 
 def verify_list(release_dir, allowed_signers=None, state=None, now=None,
                 template_version=None, require_shards=False, max_age_hours=48,
-                update_state=False):
+                update_state=True):
     """Run the official verifier (scripts/verify.sh / kt.verify.verify_release) on a local dir.
 
     That path covers keys.json, rollback state, a missing-keys refusal once pins are
     published, latest.json hash and file_type checks, and shard SHA-256 vs the manifest.
-    Never contacts the network. Returns a dict with ok, reason, detail, and code.
+    After a successful verify, the check path writes the rollback watermark when a
+    state file is given (pass update_state=False to skip the write). Never contacts
+    the network. Returns a dict with ok, reason, detail, and code.
     """
     allowed = allowed_signers or os.path.join(ROOT, "config", "allowed_signers")
     now_val = parse_time(now) if isinstance(now, str) else now

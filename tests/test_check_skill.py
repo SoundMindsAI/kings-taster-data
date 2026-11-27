@@ -1,6 +1,7 @@
 """Checklist skill (SPEC.md §4): caps, extractors, and fixed decision rules. No network."""
 import json
 import os
+import subprocess
 import re
 import unittest
 
@@ -75,6 +76,7 @@ class TestSkillCaps(unittest.TestCase):
             "keys.json",
             "root_pins",
             "--state",
+            "--update-state",
             "SHA-256",
             "config/popular/",
             "~/.kings-taster/keys.env",
@@ -489,6 +491,55 @@ class TestListVerify(unittest.TestCase):
         self.assertFalse(vr["ok"], vr)
         self.assertEqual(vr["reason"], "unverified_list")
         self.assertIn("keys.json", vr["detail"].lower())
+
+    def test_skill_verify_command_writes_watermark_and_refuses_older_release(self):
+        """Following the skill's exact verify command writes the watermark; a replay is refused."""
+        import datetime as dt
+        from tests.helpers import T0
+        from tests.test_sign_verify import sign_dir
+        from kt import build as B
+
+        newer_now = T0 + dt.timedelta(days=1)
+        newer = os.path.join(self.tmp, "newer")
+        B.build(self.src, newer, previous_dir=self.out, bootstrap=False, now=newer_now, root=self.root)
+        sign_dir(newer, self.key)
+
+        documented = ("scripts/verify.sh DIR --allowed-signers allowed_signers "
+                      "--state ~/.kings-taster/verify-state.json --update-state")
+        self.assertIn(documented, C.skill_text())
+
+        state = os.path.join(self.tmp, "verify-state.json")
+        script = os.path.join(REPO, "scripts", "verify.sh")
+        now_iso = "2026-11-28T06:17:00Z"
+        # Skill command with only test paths (and --now to pin the fixture clock) substituted.
+        cmd = [script, "DIR", "--allowed-signers", "allowed_signers",
+               "--state", "~/.kings-taster/verify-state.json", "--update-state"]
+        self.assertEqual(cmd[0], script)
+        self.assertEqual(cmd[1:], documented.split()[1:])  # DIR ... --update-state
+        run_cmd = [script, newer, "--allowed-signers", self.allowed,
+                   "--state", state, "--update-state", "--now", now_iso]
+        first = subprocess.run(run_cmd, capture_output=True, text=True, timeout=60)
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        self.assertTrue(os.path.isfile(state), "watermark was not written")
+
+        replay = subprocess.run(
+            [script, self.out, "--allowed-signers", self.allowed,
+             "--state", state, "--update-state", "--now", now_iso],
+            capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+        self.assertIn("rollback", (replay.stdout + replay.stderr).lower())
+
+        # The Python check path defaults to writing the watermark too.
+        vr = C.verify_list(self.out, allowed_signers=self.allowed, state=state, now=now_iso)
+        self.assertFalse(vr["ok"])
+        self.assertIn("rollback", vr["detail"].lower())
+
+    def test_verify_list_default_writes_watermark(self):
+        state = os.path.join(self.tmp, "watermark.json")
+        vr = C.verify_list(self.out, allowed_signers=self.allowed, state=state,
+                           now="2026-11-27T06:17:00Z")
+        self.assertTrue(vr["ok"], vr)
+        self.assertTrue(os.path.isfile(state))
 
     def test_module_names_the_official_verifier(self):
         path = os.path.join(REPO, "kt", "check.py")
