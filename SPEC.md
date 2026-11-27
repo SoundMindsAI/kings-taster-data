@@ -406,7 +406,7 @@ does: X sees the account that posts it.
 
 **The plain statement,** shown at first run, on the King's Taster page and in this repo's README:
 
-> When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your bot's AI (xAI) sees your requests. A finding is shared only when you approve the exact post, each time.
+> When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what it checks, like anything you ask it. A finding is shared only when you approve the exact post, each time.
 
 No wording stronger than this statement is ever used.
 
