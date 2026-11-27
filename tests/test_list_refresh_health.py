@@ -333,6 +333,21 @@ class TestRefresh(SignedCacheCase):
                          load(os.path.join(later, "latest.json"))["generated_at"])
         self.assertFalse(os.path.exists(R._bak_dir(self.cache)))
 
+    def test_watermark_failure_on_first_install_does_not_claim_a_kept_cache(self):
+        self.assertFalse(os.path.exists(self.cache))
+        real = self._patch_watermark_verify_to_fail()
+        try:
+            out = R.refresh(self.cache, self.release, fetcher=R.LocalFetcher(self.release),
+                            allowed_signers=self.allowed, state=self.state, now=T0_ISO)
+        finally:
+            R._verify = real
+        self.assertFalse(out["ok"], out)
+        self.assertEqual(out["failed"], "unverified_list")
+        self.assertFalse(os.path.exists(os.path.join(self.cache, "latest.json")))
+        self.assertNotIn("The last good cache was kept.", out["lines"])
+        self.assertEqual(out["lines"][-1], "There is no cached list yet, so nothing was installed.")
+        self._assert_no_incoming_leftovers()
+
     def test_watermark_failure_on_unchanged_list_is_not_ok(self):
         self.seed_cache(shards=1)
         before = load(os.path.join(self.cache, "latest.json"))
@@ -694,7 +709,7 @@ class TestClientHealth(SignedCacheCase):
         self.seed_cache(shards=1)
         man = load(os.path.join(self.cache, "manifest.json"))
         self.assertIsNone(H._caps_ok(self.cache, man, verified=True))
-        for bad in (None, "4096", 4096.0, True):
+        for bad in (None, "4096", 4096.0, True, 0, -1):
             doc = json.loads(json.dumps(man))
             if bad is None:
                 del doc["shards"][0]["gzip_bytes"]

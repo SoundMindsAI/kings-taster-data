@@ -189,6 +189,8 @@ def _caps_ok(cache_dir, manifest, *, verified=False):
             gz = s.get("gzip_bytes")
             if isinstance(gz, bool) or not isinstance(gz, int):
                 return "a shard has no signed gzip size in the manifest"
+            if gz < 1:
+                return "a shard has no signed gzip size in the manifest"
             if gz > MAX_SHARD_GZIP_BYTES:
                 return "a cached shard is over the 5 MB gzip cap"
             continue

@@ -449,6 +449,24 @@ class TestHosts(unittest.TestCase):
         self.assertNotEqual((host_q or "").lower(), "github.com")
         self.assertNotEqual((host_h or "").lower(), "github.com")
 
+    def test_two_full_urls_must_name_the_same_host(self):
+        # N3: both arguments full URLs: the second must not be ignored.
+        good = "https://github.com" + self.LIST_OK
+        evil = "https://evil.example" + self.LIST_OK
+        self.assertFalse(C.host_allowed(good, evil))
+        self.assertFalse(C.host_allowed(evil, good))
+        host, _ = C._split_host_path(good, evil)
+        self.assertEqual(host, "")
+        self.assertTrue(C.host_allowed(good, "https://GitHub.com" + self.LIST_OK))
+
+    def test_backslash_semicolon_tab_or_userinfo_in_authority_is_refused(self):
+        # N12: WHATWG parsers read '\' as a path separator, so these name another host.
+        for sep in ("\\", ";", "\t"):
+            with self.subTest(sep=repr(sep)):
+                self.assertFalse(C.host_allowed("https://evil.example" + sep + "@" + "github.com" + self.LIST_OK))
+        self.assertFalse(C.host_allowed("https://user@" + "github.com" + self.LIST_OK))
+        self.assertTrue(C.host_allowed("https://github.com" + self.LIST_OK))
+
 
 @unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")
 class TestListVerify(unittest.TestCase):

@@ -60,10 +60,11 @@ def official_url_problem(url, allowed_hosts):
         return "encoded dot, slash or backslash"
     try:
         parts = urlsplit(url)
+        port = parts.port
     except ValueError:
         return "unparsable"
     host = (parts.hostname or "").lower()
-    if parts.scheme != "https" or host not in allowed_hosts or parts.port is not None or parts.username or parts.password:
+    if parts.scheme != "https" or host not in allowed_hosts or port is not None or parts.username or parts.password:
         return "not an official https host"
     path = parts.path
     decoded = path

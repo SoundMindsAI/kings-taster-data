@@ -330,10 +330,12 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
 
     def fail(reason, detail):
         result["failed"] = reason
+        had_cache = os.path.isfile(os.path.join(cache_dir, "latest.json"))
         result["lines"] = [
             "List refresh failed: %s." % reason,
             detail,
-            "The last good cache was kept.",
+            "The last good cache was kept." if had_cache
+            else "There is no cached list yet, so nothing was installed.",
         ][:3]
         return result
 

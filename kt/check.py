@@ -159,8 +159,9 @@ def _split_host_path(host, url_path):
     """
     path = url_path or ""
     raw_host = host or ""
-    source = raw_host if ("://" in raw_host or raw_host.startswith("//")) else (
-        path if ("://" in path or path.startswith("//")) else None)
+    host_is_url = "://" in raw_host or raw_host.startswith("//")
+    path_is_url = "://" in path or path.startswith("//")
+    source = raw_host if host_is_url else (path if path_is_url else None)
     if source is not None:
         rest = source.split("://", 1)[-1] if "://" in source else source[2:]
         authority, _, remainder = rest.partition("/")
@@ -168,8 +169,10 @@ def _split_host_path(host, url_path):
         # https://evil.example?x=@github.com/...). Refuse before the '@' split.
         if "?" in authority or "#" in authority:
             return "", "/"
-        if "@" in authority:
-            authority = authority.rsplit("@", 1)[1]
+        # A backslash, ';' or tab makes WHATWG parsers pick a different host than
+        # urlsplit does, and userinfo is never allowed on an official URL.
+        if "\\" in authority or ";" in authority or "\t" in authority or "@" in authority:
+            return "", "/"
         # Strip a port, but keep IPv6 in brackets out of scope (we only allow names).
         if authority.startswith("["):
             hostname = authority[1:].split("]", 1)[0]
@@ -177,7 +180,17 @@ def _split_host_path(host, url_path):
             hostname = authority.split(":", 1)[0]
         parsed_path = "/" + remainder if remainder or rest.endswith("/") or "/" in rest else "/"
         parsed_path = parsed_path.split("?", 1)[0].split("#", 1)[0]
-        if "://" in raw_host or raw_host.startswith("//"):
+        if host_is_url and path_is_url:
+            # Both are full URLs: the path URL must name the same host.
+            other = path.split("://", 1)[-1] if "://" in path else path[2:]
+            other_auth = other.partition("/")[0]
+            if other_auth.startswith("["):
+                other_host = other_auth[1:].split("]", 1)[0]
+            else:
+                other_host = other_auth.split(":", 1)[0]
+            if other_host.lower() != hostname.lower():
+                return "", parsed_path
+        if host_is_url:
             return hostname, parsed_path
         # url_path is a full URL: always use its hostname. A bare host
         # argument that disagrees is a mismatch and is refused.
