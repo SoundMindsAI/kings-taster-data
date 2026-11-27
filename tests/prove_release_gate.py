@@ -170,7 +170,7 @@ def main(argv):
     if case not in ("fail", "hold"):
         sys.stderr.write("prove_release_gate: case must be fail or hold\n")
         return 2
-    harness = SignAndReleaseBase("prove")
+    harness = SignAndReleaseBase("setUp")
     harness.setUp()
     try:
         result = prove_fail(harness) if case == "fail" else prove_hold(harness)
