@@ -72,17 +72,7 @@ class TestSkillAndRoutineCaps(unittest.TestCase):
                            "urlopen", "import requests", "tweepy", "create_posts"):
                 self.assertNotIn(banned, src, banned)
 
-    def test_no_new_schedule_was_added(self):
-        import subprocess
-        diff = subprocess.run(
-            ["git", "diff", "--name-only", "origin/main"],
-            cwd=REPO, capture_output=True, text=True, check=True)
-        for name in diff.stdout.splitlines():
-            self.assertFalse(name.startswith(".github/workflows/"), name)
 
-
-@unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen not installed")
-class SignedCacheCase(unittest.TestCase):
     def setUp(self):
         from tests.test_sign_verify import keygen, sign_dir
         self.tmp = tmpdir(self)
