@@ -356,3 +356,65 @@ class TestSignAndRelease(SignAndReleaseBase):
         self.assertFalse(any(a.endswith(".sig") for a in shards))  # pinned by the signed manifest instead
         self.assertLessEqual(len(assets), 1000)
         self.assertFalse(any(self.key in " ".join(c) for c in calls))
+
+
+def _pub(priv):
+    with open(priv + ".pub") as f:
+        return " ".join(f.read().split()[:2])
+
+
+@unittest.skipUnless(HAVE_SSH, "ssh-keygen not installed")
+class TestKeysReleaseHook(VerifyBase):
+    """Once pins exist, daily signatures follow keys.json (M1, M2)."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.test_keys import keygen as kgen, write_pins, keys_doc, write_keys, sign_file, blob
+        from kt import keys as K
+        from kt.common import fmt_time
+        import datetime as dt
+        self.kgen, self.write_pins, self.keys_doc = kgen, write_pins, keys_doc
+        self.write_keys, self.sign_file, self.blob = write_keys, sign_file, blob
+        self.K, self.fmt_time, self.dt = K, fmt_time, dt
+        self.root_priv, self.root_pub = kgen(self.tmp, "master")
+        _bak_priv, bak_pub = kgen(self.tmp, "master-backup")
+        self.pins = os.path.join(self.tmp, "root_pins")
+        write_pins(self.pins, self.root_pub, bak_pub)
+        self.addCleanup(setattr, K, "DEFAULT_PINS", K.DEFAULT_PINS)
+        K.DEFAULT_PINS = self.pins
+
+    def put_keys(self, out, doc, key=None):
+        path = self.write_keys(out, doc)
+        self.sign_file(path, key or self.root_priv)
+        return path
+
+    def test_release_verifies_when_keys_json_lists_the_daily_key(self):
+        out = self.release("ok-keys")
+        doc = self.keys_doc(_pub(self.cur), now=T0, next_pub=_pub(self.nxt))
+        self.put_keys(out, doc)
+        self.assertEqual(self.v(out)[0], 0)
+
+    def test_revoked_daily_key_refused_even_if_still_in_allowed_signers(self):
+        out = self.release("revoked-daily")
+        old_fp = self.K.fingerprint_of(self.blob(_pub(self.cur)))
+        later = T0 + self.dt.timedelta(days=1)
+        doc = self.keys_doc(_pub(self.nxt), now=later)
+        doc["revoked_keys"] = [{"fingerprint": old_fp, "principal": "kings-taster-current",
+                                "revoked_at": self.fmt_time(later), "reason": "rotated"}]
+        self.put_keys(out, doc)
+        with self.assertRaisesRegex(KV.VerifyError, "not signed by an allowed key|does not allow"):
+            self.v(out, now=later)
+
+    def test_keys_json_rollback_via_state(self):
+        a = self.release("keys-a")
+        self.put_keys(a, self.keys_doc(_pub(self.cur), now=T0))
+        state = os.path.join(self.tmp, "state.json")
+        self.assertEqual(self.v(a, state=state, update_state=True, now=T0)[0], 0)
+        later = T0 + self.dt.timedelta(hours=1)
+        b = self.release("keys-b", now=later, prev=a)
+        self.put_keys(b, self.keys_doc(_pub(self.cur), now=later))
+        self.assertEqual(self.v(b, state=state, update_state=True, now=later)[0], 0)
+        self.put_keys(b, self.keys_doc(_pub(self.cur), now=T0))
+        with self.assertRaisesRegex(KV.VerifyError, "rollback"):
+            self.v(b, state=state, now=later)
+

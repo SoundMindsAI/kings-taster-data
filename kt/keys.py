@@ -26,7 +26,7 @@ MAX_REVOKED = 64
 MAX_VALIDITY_SECONDS = 90 * 24 * 3600
 FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 PUB_RE = re.compile(r"^[A-Za-z0-9+/]{68}(?:==|=)?\Z")
-ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z", re.ASCII)
 _VALID_TIME = r'"\d{8}(?:\d{4,6})?Z?"'
 _OPTION = re.compile(r'namespaces="kings-taster-keys"|valid-after=' + _VALID_TIME + r'|valid-before=' + _VALID_TIME)
 PIN_LINE = re.compile(
@@ -194,11 +194,10 @@ def verify_keys_file(path, pins_path, now=None, previous_generated_at=None, prev
         raise KeysError("master public keys are not published yet; keys.json is refused")
     if not os.path.exists(path):
         raise KeysError("keys.json is missing")
-    size = os.path.getsize(path)
-    if size > MAX_BYTES:
-        raise KeysError("keys.json is over the size cap")
     with open(path, "rb") as f:
-        raw = f.read()
+        raw = f.read(MAX_BYTES + 1)
+    if len(raw) > MAX_BYTES:
+        raise KeysError("keys.json is over the size cap")
     try:
         doc = loads_strict(raw)
     except ValueError:
@@ -206,8 +205,7 @@ def verify_keys_file(path, pins_path, now=None, previous_generated_at=None, prev
     errs = validate_keys(doc, raw=raw, now=now)
     if errs:
         raise KeysError(errs[0])
-    allowed = pins_path
-    signer = verify_file(path, allowed, namespace=NAMESPACE, principals=ROOT_PRINCIPALS)
+    signer = verify_file(path, pins_path, namespace=NAMESPACE, principals=ROOT_PRINCIPALS, data=raw)
     if previous_generated_at:
         gen = parse_time(doc["generated_at"])
         last = parse_time(previous_generated_at)

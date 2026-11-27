@@ -6,7 +6,8 @@ import subprocess
 import unittest
 
 from kt import keys as K
-from kt.common import canonical_json, fmt_time, sha256_bytes
+from kt.common import canonical_json, fmt_time, parse_time, sha256_bytes
+from kt import verify as KV
 from tests.helpers import REPO, T0, tmpdir
 
 HAVE_SSH = shutil.which("ssh-keygen") is not None
@@ -219,3 +220,22 @@ class TestKeys(unittest.TestCase):
                 text = f.read()
             self.assertNotIn("PRIVATE KEY", text)
             self.assertNotIn("BEGIN OPENSSH", text)
+
+    def test_fullwidth_digits_in_timestamp_refused(self):
+        doc = keys_doc(self.cur_pub)
+        doc["generated_at"] = "２０２６-11-27T06:17:00Z"
+        self.assertTrue(any("generated_at" in e or "pattern" in e or "does not match" in e
+                            for e in K.validate_keys(doc, now=T0)))
+        with self.assertRaises(ValueError):
+            parse_time("２０２６-11-27T06:17:00Z")
+
+    def test_verify_file_uses_already_read_bytes(self):
+        path = self.signed()
+        with open(path, "rb") as f:
+            raw = f.read()
+        with open(path, "wb") as f:
+            f.write(b'{"file_type":"keys"}\n')
+        signer = KV.verify_file(path, self.pins, namespace=K.NAMESPACE,
+                                principals=K.ROOT_PRINCIPALS, data=raw)
+        self.assertEqual(signer, "kings-taster-root")
+
