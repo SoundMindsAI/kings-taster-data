@@ -80,8 +80,10 @@ Those pins are not published yet. Until they are, a release is still verified ag
   fails. If the list, or any one shard, grows by more than 50% from one day to the next, the release is held
   until a person reviews it. CI holds no signing key and no secrets.
 - The owner signs and publishes with `scripts/sign-and-release.sh`, which re-validates the artifact, checks it
-  against the live release (newer `generated_at`, no dropped revocations), stops on the circuit breaker, signs
-  with `ssh-keygen -Y sign`, runs the same health check on the signed files, and creates the release.
+  against the live release (newer `generated_at`, no dropped revocations), stops on the circuit breaker, runs
+  the same health check on the unsigned files (26-hour age bound), signs with `ssh-keygen -Y sign` only if
+  that check passes or a hold has been accepted, then verifies the signatures and creates the release. If the
+  health check fails, or any other unexpected result occurs, nothing is signed and nothing is published.
 - Malicious entries on popular package names are held at Caution (`pending_review`) until the owner approves
   them in `review/popular-approvals.json`, and approval also needs two distinct upstream origins.
 - Python standard library only; no third-party packages. All GitHub Actions are pinned to full commit SHAs.

@@ -395,13 +395,16 @@ An hourly watchdog fails, and so alerts SoundMinds, if the signed list is more t
 the first release exists, it passes with a notice. That hourly run also checks canaries and dates on the
 pointer files it already downloads; it does not re-download every shard each hour.
 
-A daily pipeline health check runs after each daily build, and again at sign-and-release after the files are
+A daily pipeline health check runs after each daily build, and again at sign-and-release before any files are
 signed. It checks:
 
 - **Build:** today's `latest.json`, `manifest.json` and every shard were built, with every shard's SHA-256
   matching the manifest.
-- **Signing:** at sign-and-release, the files verify against an allowed signing key, and the canary
-  entries are present. The unsigned CI build checks canaries and leaves signatures to sign-and-release.
+- **Signing:** at sign-and-release, the health check runs on the unsigned files before any signing, and the
+  canary entries must be present. If the check fails, a hold is not accepted, or anything else unexpected
+  happens, nothing is signed and nothing is published. If health passes, or a person has accepted a hold,
+  the files are signed and then verified against an allowed signing key. The unsigned CI build checks
+  canaries and leaves signatures to sign-and-release.
 - **No source went silent.** A source fails if its fetch failed, if it returned zero entries when it shouldn't,
   or if it added nothing for longer than its usual gap. The starting gaps are 3 days for OSV `MAL-` records and
   14 days for CISA KEV, recorded in `config/limits.json` under `pipeline_health`. They will be tuned from 30
