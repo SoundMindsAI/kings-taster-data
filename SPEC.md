@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.0, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.1, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -14,8 +14,8 @@ each citing its sources and their dates. It never says "safe".
 
 - **No SoundMinds server.** Each installed bot asks official sources directly and checks this repo's signed
   list file. Nothing is sent to SoundMinds unless you choose to report something to us.
-- **Strict answers.** Never "safe" or "guaranteed". A clean answer is "No known reports, checked against
-  <sources> on <date>". Every verdict cites a source and a date. Any failed check means
+- **Strict answers.** Never "safe" or "guaranteed". A clean answer is
+  "No known reports. Checked against <source> (<date>), <source> (<date>) on <date>." Every verdict cites a source and a date. Any failed check means
   "Unknown, don't proceed".
 - **Text-only template.** A Grok Bot template carries text (skills and routines as prose). Nothing runs at
   install. Checks are an AI following a fixed checklist with fixed commands, or an optional local checker the
@@ -26,6 +26,9 @@ each citing its sources and their dates. It never says "safe".
   it's safe. Your checks go from your bot to the sources listed, and to your bot's AI provider, never to
   SoundMinds. Any keys you add are visible to your bot's AI.
 - Only the official template link on soundminds.ai is from us; copies from anywhere else are not.
+- You install King's Taster from soundminds.ai/kings-taster. Until every release requirement in this spec has
+  passed, the install button there says "Coming soon" and has no link. The same page links to this repo and
+  to this `SPEC.md`.
 
 ## 2. Trust model
 
@@ -68,7 +71,7 @@ vulnerable (Caution, "upgrade to X or later"). A live malicious hit on a popular
 | Caution | "Caution. <reason>, from <source> (<link>, <date>)." |
 | Unknown | "Unknown. I couldn't finish the check: <which check>. Don't proceed until it can be checked." |
 | Unknown, no link source | "Unknown. I can't check links until a link-reputation source is set up. Don't proceed. Say 'set up link checks' to add one." |
-| No known reports | "No known reports. Checked against <source (date)>, … on <date>." |
+| No known reports | "No known reports. Checked against <source> (<date>), <source> (<date>) on <date>." |
 
 ### 3.2 Packages and repos
 
@@ -113,20 +116,64 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
   naming a source and date in every verdict, and giving Unknown for any failed check. Everything else is in
   skills loaded only when needed:
   `kings-taster-check` (400 words plus at most 150 lines of commands), `kings-taster-report` (250),
-  `kings-taster-list-refresh` (200 plus at most 40 lines), and `kings-taster-build` (3,000 plus at most 300
-  lines of snippets), which loads only to build or update the checker.
+  `kings-taster-list-refresh` (200 plus at most 40 lines), `kings-taster-routing` (250 plus the 30-word line in
+  §4C), and `kings-taster-build` (3,000 plus at most 300 lines of snippets), which loads only to build or update
+  the checker.
 - A verdict is **5 lines or fewer**: the result and item; the deciding source and date; the other sources and
   their status; the reason code if Unknown or Caution; the path of the full finding record
   (`~/.kings-taster/findings/`), opened only when the user asks why.
 - READMEs, lockfiles, descriptions, scripts and raw responses never enter the AI's context; `conformance.json`
   and `iocs.json` are read from disk by code, never loaded whole.
-- Routines are one line pointing to a skill (a daily list refresh and, if the checker is used, a weekly
-  conformance rerun) and are silent unless something changed for the user.
+- Routines are one line pointing to a skill (a daily list refresh, a weekly conformance rerun if the checker is
+  used, and a weekly routing check from §4C) and are silent unless something changed for the user.
 - **Caching:** the list file is kept until a new signed `latest.json` appears (compare its hash first).
   Package and repo verdicts may be reused for the same name, version and list-file hash within 24 hours,
   showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
   file is cached for 7 days.
 - A normal check loads 2,000 words or fewer and never loads `kings-taster-build`.
+
+## 4C. First run: who routes your work
+
+King's Taster works best when your other bots ask it before they download, install or click anything new.
+King's Taster never edits another bot itself. It only helps you add one line to the bots you choose.
+
+The line is the same everywhere and is never longer than 30 words:
+
+> Before you or any bot downloads, installs or clicks anything new, ask King's Taster and wait for its verdict. Don't proceed on Block or Unknown.
+
+At first run, King's Taster asks "Who routes your work?" and offers three choices:
+
+1. **"I have a chief-of-staff bot."** King's Taster shows the line. You either paste it into that bot's
+   instructions yourself, or approve King's Taster sending that bot one message asking it to add the line. You
+   then approve that change wherever the other bot asks for it.
+2. **"No chief of staff."** King's Taster lists your bots whose descriptions mention code, repos, packages,
+   installs, downloads, browsing or links. You tick the ones to cover, and each one gets the line the same way,
+   by your paste or by a message you approve.
+3. **"Just this bot."** King's Taster says "Ask me before you download, install or click something new," and
+   sets up nothing else.
+
+King's Taster saves your answer and the names of the covered bots in `~/.kings-taster/routing.json`. That file
+holds bot names only, never their instructions.
+
+Once a week, a routine runs "Run kings-taster-routing-check." For each covered bot, King's Taster confirms the
+line is still there. It reads the bot's instructions if it can see them. If you approved it at first run, it
+asks the bot to answer yes or no. Otherwise, it asks you.
+
+- The weekly check is silent when the line is in place.
+- If the line is missing, King's Taster sends you one nudge that week, "The King's Taster line is missing from
+  <bot>. Paste it again?", with the line included. It never adds the line back itself.
+- If a covered bot hasn't asked King's Taster anything in 30 days, that week's message adds one note saying so:
+  "<bot> hasn't asked me anything in 30 days." It's a fact, not an accusation.
+
+Some bot setups don't let one bot list, read or message another. Where that's the case, you paste the line
+yourself, and the weekly check asks you instead of the bot. The spec doesn't assume these abilities exist.
+
+The `kings-taster-routing` skill loads only at first run, at the weekly check, or when you ask about routing.
+The 30-word line is the only text King's Taster adds to any other bot's always-on instructions.
+
+Before release, all three first-run paths are tested. The tests confirm that King's Taster never changes another
+bot without your paste or approval, that the line is 30 words or fewer, and that the weekly check stays silent
+when the line is present and sends one nudge when it's removed.
 
 ## 5. Optional local checker
 
@@ -287,3 +334,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 | Spec version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-11-26 | First public version. |
+| 1.1 | 2026-11-26 | Adds §4C (first-run routing and the weekly routing check), the `kings-taster-routing` skill, and the install page. |

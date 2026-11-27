@@ -3,7 +3,7 @@ Signed public list of known-bad repos, packages and links, built only from offic
 
 **King's Taster** ("the King's Poison Taster") checks a repo before a clone or pull, an npm or PyPI package
 before install, and a link before you open it. It answers Block, Caution, Unknown ("don't proceed") or
-"No known reports, checked against <sources> on <date>". It never says "safe": "No known reports" means nothing
+"No known reports. Checked against <source> (<date>), <source> (<date>) on <date>." It never says "safe": "No known reports" means nothing
 was found, not that something is safe.
 
 King's Taster loads only the skill it needs. A normal check reads a few short fields and replies in five lines or fewer.
