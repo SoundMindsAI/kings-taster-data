@@ -140,6 +140,10 @@ def validate_shards(d, manifest, iocs=None, require_all=True, limits_caps=None):
         return errors + ["manifest: shard list does not match the groups and prefix lengths"]
     if manifest["counts"]["shards"] != len(names):
         errors.append("manifest: shard count mismatch")
+    listed = {s["file"] for s in manifest["shards"]}
+    extra = [n for n in os.listdir(d) if n.startswith("shard-") and n not in listed]
+    if extra:
+        errors.append("release dir holds %d shard file(s) the manifest doesn't list" % len(extra))
     total, by_group, by_type, revoked_total = 0, {}, {}, 0
     seen_ids, seen_rev = {}, {}
     for s in manifest["shards"]:
@@ -162,7 +166,8 @@ def validate_shards(d, manifest, iocs=None, require_all=True, limits_caps=None):
             b = f.read()
         if sha256_bytes(b) != s["sha256"] or len(b) != s["bytes"]:
             errors.append("shard %s hash/size mismatch" % s["name"]); continue
-        if gzip_size(b) > caps["shard_gzip_bytes"] or gzip_size(b) != s["gzip_bytes"]:
+        gz = gzip_size(b)
+        if gz > caps["shard_gzip_bytes"] or gz != s["gzip_bytes"]:
             errors.append("shard %s gzip size is wrong or over the cap" % s["name"]); continue
         try:
             doc = loads_strict(b)

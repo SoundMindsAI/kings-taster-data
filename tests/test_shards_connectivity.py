@@ -234,6 +234,7 @@ class TestConnectivity(unittest.TestCase):
         self.assertEqual(V.validate_connectivity(conf["connectivity"]), [])
         c = conf["connectivity"]
         self.assertTrue(re.match(c["pattern"], "KT 1.4.0 is live and checking"))
+        self.assertIsNone(re.match(c["pattern"], "KT 1.4.0 is live and checking\n"))
         for change in (("offer", "Post a reply?"), ("override_allowed", True), ("counts_toward_report_caps", False),
                        ("approval_notice", "This posts.")):
             bad = copy.deepcopy(c)
@@ -258,3 +259,10 @@ class TestDocs(unittest.TestCase):
             spec = f.read()
         quote = re.search(r"\*\*The plain statement,\*\*[^\n]*\n\n> (.+)\n", spec).group(1)
         self.assertIn("\n" + quote + "\n", readme)
+
+    def test_report_caps_in_spec_match_limits(self):
+        caps = load(os.path.join(REPO, "config", "limits.json"))["reports_per_install"]
+        day, week, item = caps["per_day"], caps["per_week"], caps["per_item_per_week"]
+        with open(os.path.join(REPO, "SPEC.md"), encoding="utf-8") as f:
+            spec = " ".join(f.read().split())
+        self.assertIn("%d a day, %d a week, and %d per item per week" % (day, week, item), spec)

@@ -188,6 +188,14 @@ class TestVerify(VerifyBase):
         with self.assertRaisesRegex(KV.VerifyError, "shard kev hash/size mismatch"):
             self.v(out)
 
+    def test_unlisted_shard_file_refused_by_verify(self):
+        out = self.release("a")
+        shutil.copy(os.path.join(out, "shard-kev.json"), os.path.join(out, "shard-npm-zz.json"))
+        with self.assertRaisesRegex(KV.VerifyError, "doesn't list"):
+            self.v(out)
+        os.remove(os.path.join(out, "shard-npm-zz.json"))
+        self.assertEqual(self.v(out)[0], 0)
+
     def test_unsigned_manifest_change_refused(self):
         out = self.release("a")
         m = load(os.path.join(out, "manifest.json"))

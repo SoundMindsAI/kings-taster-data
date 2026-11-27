@@ -45,7 +45,8 @@ Each release also holds the list split into shards, 518 of them for now (`shard-
 `pypi`, and one shard each for `kev`, `domain`, `url`, `ip`, `hash` and `repo_owner`). npm and PyPI entries go to
 the shard named by the first byte of the SHA-256 of their `match_key`. Shards have no `.sig` of their own. Instead,
 each shard's SHA-256 is listed in the signed `manifest.json`, so a changed shard is caught. A bot will download
-only the shard it needs, so GitHub sees only a hash bucket shared by many items. See [SPEC.md §6.5](SPEC.md#65-sharding).
+only the shard it needs. That shows GitHub the item's group, never the item itself, and for npm and PyPI only a
+hash bucket shared by many items. See [SPEC.md §6.5](SPEC.md#65-sharding).
 
 Fixed download URLs:
 `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and

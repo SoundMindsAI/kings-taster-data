@@ -5,8 +5,9 @@ python3 -m kt.verify <dir> --allowed-signers config/allowed_signers
        [--require-shards]
 
 <dir> holds latest.json, iocs.json, conformance.json, stats.json, manifest.json and a .sig for each.
-Any shard-*.json files in <dir> are checked against the signed manifest (SHA-256, size, gzip cap, counts);
-with --require-shards every shard the manifest lists must be present.
+Any shard-*.json files in <dir> are checked against the signed manifest (SHA-256, size, gzip cap, counts).
+Shard files the manifest does not list are refused. With --require-shards every shard the manifest lists must
+be present.
 Prints one verdict line. Exit codes:
   0 VERIFIED   1 UNVERIFIED (bad/missing signature, wrong key, hash mismatch, bad file, rollback)
   3 PAUSED     4 UPDATE_REQUIRED   5 STALE

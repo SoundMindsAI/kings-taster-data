@@ -175,7 +175,7 @@ def validate_conformance(doc):
 
 
 CONN_FIXED = {"template": "KT {version} is live and checking",
-              "pattern": "^KT \\d{1,3}\\.\\d{1,3}\\.\\d{1,3} is live and checking$",
+              "pattern": "^KT \\d{1,3}\\.\\d{1,3}\\.\\d{1,3} is live and checking\\Z",
               "offer": CONN.OFFER, "approval_notice": CONN.APPROVAL_NOTICE, "read_only_ok": CONN.READ_ONLY_OK,
               "default_answer": "no", "state_key": CONN.STATE_KEY, "counts_toward_report_caps": True,
               "counts_as_threat_report": False, "override_allowed": False}
@@ -313,10 +313,6 @@ def validate_release_dir(d, previous_dir=None, fast_entries=True, now=None):
     errors += ["manifest.json: " + e for e in m_errs]
     if not m_errs and not errors:
         errors += SH.validate_shards(d, docs["manifest.json"], iocs=docs["iocs.json"], require_all=True)
-        listed = {s["file"] for s in docs["manifest.json"]["shards"]}
-        extra = [n for n in os.listdir(d) if n.startswith("shard-") and n not in listed]
-        if extra:
-            errors.append("release dir holds %d shard file(s) the manifest doesn't list" % len(extra))
     errors += validate_latest(docs["latest.json"], d, raw=raws["latest.json"])
     if not errors:
         errors += check_not_future(docs["latest.json"]["generated_at"], now)

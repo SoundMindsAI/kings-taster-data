@@ -183,7 +183,8 @@ checks four things:
 
 1. **The list file:** it is fresh (under 48 hours old), its signature verifies, its version isn't older than the
    last one accepted, its date isn't more than 10 minutes ahead of `date -u`, and the manifest and every cached
-   shard are under their size caps (§6.5).
+   shard are under their size caps (§6.5). That 10-minute window is the client's check. Signing and the published
+   verifier refuse a file dated more than 5 minutes ahead.
 2. **Canaries:** for each required source, the fixed known-bad test item is caught. That means the OSV canary
    package, the list file's fake entry for each type, and Google's Safe Browsing test URL if it's set up. RDAP
    is tested with a fixed, known domain.
@@ -225,8 +226,9 @@ the bot to checklist mode, and a pass must clear it.
 4. **Once per install.** It records `connectivity_done` in `~/.kings-taster/state.json` and never offers the
    check again by itself. No routine, health check or other bot can start it. You can ask for it again later,
    and that goes through the same steps.
-5. A posted reply counts as one report toward the per-install report limits (3 a day, 10 a week, and 1 per item
-   per week). It carries no finding data and is never counted as a threat report.
+5. The reply will count as one report toward the per-install report limits (3 a day, 10 a week, and 1 per item
+   per week) as soon as the user says yes, even if posting then fails. It carries no finding data and is never
+   counted as a threat report.
 
 The fixed texts and test cases for these steps are in the `connectivity` section of `conformance.json`.
 
@@ -308,8 +310,8 @@ whole list, but a bot will download only the shard it needs.
   cap, that group's prefix length will be raised. In a later live build that day (238,548 entries), the manifest
   was 122 KB, npm shards were 34 to 40 KB gzipped (802 to 958 entries each), PyPI shards were 2 to 4 KB
   gzipped, and the `kev` shard was 57 KB gzipped.
-- **Privacy.** Fetching a shard shows GitHub only the item's group and a hash bucket shared by many items,
-  never the item itself.
+- **Privacy.** Fetching a shard never shows GitHub the item itself. For npm and PyPI, GitHub sees only a hash
+  bucket shared by many items. For the other groups, which are not split, GitHub sees the whole group.
 
 ## 7. Pipeline and signing
 
@@ -435,7 +437,7 @@ Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at 
 | Your bot's AI provider | your request, the validated fields, the finding record, and any key you add |
 | OSV.dev | package names and versions (private-registry names only if you choose) |
 | npm and PyPI registries | package names, through metadata lookups |
-| GitHub | the repo owner and name, plus downloads of `latest.json`, the manifest and the shard for each item (your IP address). A shard shows only the item's group and a short hash bucket shared by many items, never the item itself (§6.5). |
+| GitHub | the repo owner and name, plus downloads of `latest.json`, the manifest and the shard for each item (your IP address). A shard never shows the item itself: for npm and PyPI it shows only a hash bucket shared by many items, and for the other groups it shows the whole group (§6.5). |
 | IANA, RDAP servers | the bootstrap file request, and the domain |
 | Your link-reputation provider | what that provider's lookup needs |
 | The link's own site | nothing |
@@ -450,7 +452,8 @@ release requirement.
 answer: the package name and version, the repo's owner and name, or the domain (or the link's 4-byte hash prefix
 for Safe Browsing). Nothing about you is sent, with two exceptions. Like any web request, each lookup carries your bot computer's IP address. And a Safe Browsing key, if you add one, goes to Google with that lookup.
 The daily list download goes to GitHub: `latest.json`, the manifest and the shards a check needs. A shard
-shows only the item's group and a hash bucket shared by many items (§6.5). Your IP address goes only to
+never shows GitHub the item itself. For npm and PyPI, GitHub sees only a hash bucket shared by many items.
+For the other groups, which are not split, GitHub sees the whole group (§6.5). Your IP address goes only to
 the sources being queried, and to GitHub for the list downloads. It is never written into a report or any X post. Posting works the way any post on X
 does: X sees the account that posts it.
 

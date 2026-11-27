@@ -8,5 +8,11 @@
   "max_zip_member_bytes": 1048576,
   "max_zip_total_uncompressed_bytes": 4294967296,
   "max_versions_per_entry": 500,
-  "shards": {"prefix_bytes": {"npm": 1, "pypi": 1}, "max_manifest_bytes": 5242880, "max_shard_gzip_bytes": 5242880, "max_release_assets": 1000}
+  "shards": {"prefix_bytes": {"npm": 1, "pypi": 1}, "max_manifest_bytes": 5242880, "max_shard_gzip_bytes": 5242880, "max_release_assets": 1000},
+  "reports_per_install": {
+    "comment": "Per-install report limits (SPEC.md §4D). The bot will enforce these once it is released.",
+    "per_day": 3,
+    "per_week": 10,
+    "per_item_per_week": 1
+  }
 }
