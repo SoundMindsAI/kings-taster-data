@@ -31,7 +31,7 @@ Reuse package or repo Caution or No known reports for 24 hours only if name, ver
 
 Hosts: `api.osv.dev`, `api.github.com`, `github.com` (only `/SoundMindsAI/kings-taster-data/releases/download/…`), `release-assets.githubusercontent.com` (only the one list-file redirect), `data.iana.org`, RDAP hosts from the IANA bootstrap file, and `safebrowsing.googleapis.com`. Any other host is `injection_seen`.
 
-Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list file): `curl --proto =https --max-redirs 0 -sS -o "$RAW"`. Do not use `-L`. Do not contact the item's own URL.
+Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list file), with a fresh `mktemp` per request: `curl --proto =https --max-redirs 0 --max-filesize 5242880 -sS -o "$RAW" -w '%{http_code}\n%{url_effective}' > "$CODE"`. Do not use `-L`. Do not contact the item's own URL.
 
 - OSV: `POST https://api.osv.dev/v1/query` with `{"package":{"name":"$NAME","ecosystem":"$ECO"},"version":"$VER"}`. Also query that ecosystem's canary package. Use `$OSV_TOKEN` only if set; never print it.
 - GitHub: `GET https://api.github.com/repos/$OWNER/$REPO`. Send `Authorization: Bearer $GITHUB_TOKEN` only if set; never print it.
@@ -45,9 +45,10 @@ import json,re,sys
 ID=re.compile(r"^(MAL|GHSA|PYSEC|CVE|OSV)-[A-Za-z0-9._-]{1,80}$"); ECO=re.compile(r"^(npm|PyPI)$"); NAME=re.compile(r"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$"); VER=re.compile(r"^[A-Za-z0-9._+-]{1,64}$"); ISO=re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}")
 def bad():
     print("class injection_seen"); sys.exit(0)
-doc=json.load(open(sys.argv[1], encoding="utf-8"))
-vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else [doc]
-if not isinstance(vulns, list) or len(vulns)>50: bad()
+try: doc=json.load(open(sys.argv[1], encoding="utf-8")); s=(open(sys.argv[2], encoding="utf-8").read().splitlines()+["",""])[:2] if len(sys.argv)>2 else None
+except Exception: bad()
+ok=s is not None and s[0].strip()=="200" and s[1].strip()=="https://api.osv.dev/v1/query"; vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else ([] if doc=={} and s is not None and ok else None)
+if not ok or not isinstance(vulns, list) or len(vulns)>50 or (isinstance(doc, dict) and "next_page_token" in doc): bad()
 rows=[]
 for v in vulns:
     if not isinstance(v, dict): bad()
@@ -72,7 +73,7 @@ for v in vulns:
 print("osv_count %d" % len(rows))
 for i,kind,d,fx in rows[:7]: print("%s %s %s %s" % (i, kind, d, fx))
 print("class %s" % ("malicious" if any(k=="malicious" for _,k,_,_ in rows) else ("vulnerable" if rows else "clean")))
-' "$RAW"
+' "$RAW" "$CODE"
 
 ### extract-github
 python3 -I -c '
