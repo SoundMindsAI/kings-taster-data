@@ -408,6 +408,35 @@ class TestDecisions(unittest.TestCase):
         self.assertIn("rate_limited", rec["reasons"])
         self.assertIn("try again later", rec["explanation"])
 
+    def test_missing_evidence_is_unknown(self):
+        clean = {"class": "clean", "hits": [], "osv_count": 0}
+        no_canary = _src("osv", clean)
+        del no_canary["canary_ok"]
+        no_extracted = _src("osv", clean)
+        del no_extracted["extracted"]
+        cases = {
+            "canary_ok omitted": no_canary,
+            "canary_ok none": _src("osv", clean, canary_ok=None),
+            "canary_ok non-boolean": _src("osv", clean, canary_ok="yes"),
+            "extracted omitted": no_extracted,
+            "extracted none": _src("osv", None),
+            "extracted not a dict": _src("osv", ["clean"]),
+            "empty extraction": _src("osv", C.parse_extracted("")),
+            "empty dict": _src("osv", {}),
+            "hits only empty": _src("osv", {"hits": []}),
+            "garbage class": _src("osv", {"class": "garbage", "hits": []}),
+            "bogus status": _src("osv", clean, status="weird"),
+            "non-string status": _src("osv", clean, status=5),
+        }
+        for name, osv in cases.items():
+            with self.subTest(case=name):
+                rec, _ = self._decide(self._package(), [
+                    osv,
+                    _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
+                ])
+                self.assertEqual(rec["result"], "unknown")
+                self.assertIn("check_failed", rec["reasons"])
+
     def test_missing_required_source_is_unknown(self):
         rec, _ = self._decide(self._package(), [
             _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),

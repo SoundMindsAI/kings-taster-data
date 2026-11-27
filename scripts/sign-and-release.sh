@@ -131,7 +131,20 @@ elif [ "$BOOTSTRAP" -ne 1 ]; then
 fi
 
 # 4. Circuit breaker (big changes, new popular-name hits, carried-over sources, first release).
-if "${PY[@]}" -c 'import json,sys;sys.exit(0 if json.load(open(sys.argv[1]))["needs_human"] else 1)' "$ART/build-report.json"; then
+# Fail closed: only an explicit JSON false for needs_human means "not tripped".
+# Exit 0 = false, 10 = true, 2 = unreadable/malformed/missing/non-boolean.
+breaker_rc=0
+"${PY[@]}" -c 'import json,sys
+try:
+    v = json.load(open(sys.argv[1]))["needs_human"]
+except Exception:
+    sys.exit(2)
+sys.exit(0 if v is False else 10 if v is True else 2)' "$ART/build-report.json" || breaker_rc=$?
+case "$breaker_rc" in
+  0|10) ;;
+  *) die "build-report.json is unreadable or has a missing or non-boolean needs_human; refusing to sign" ;;
+esac
+if [ "$breaker_rc" -eq 10 ]; then
   reasons="$("${PY[@]}" -c 'import json,sys;r=json.load(open(sys.argv[1]));print(",".join(r["breaker"]), "hold_queue=%d" % len(r["hold_queue"]))' "$ART/build-report.json")"
   [ "$ACCEPT_BREAKER" -eq 1 ] || die "circuit breaker tripped ($reasons); a person must review, then rerun with --accept-breaker"
   echo "sign-and-release: breaker tripped ($reasons), accepted by operator"
