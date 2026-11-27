@@ -36,3 +36,9 @@ jobs:
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$f" --pattern "$f.sig" --dir live
           done
           python3 -E -s -m kt.verify live --allowed-signers config/allowed_signers --max-age-hours 26
+          # Extends the watchdog with the non-shard health checks on the pointer files (canaries, dates).
+          # Shard hash checks run after the daily build and again at sign-and-release.
+          rc=0
+          python3 -E -s -m kt.health live --signed --no-shards --allowed-signers config/allowed_signers || rc=$?
+          if [ "$rc" -eq 2 ]; then echo "watchdog: health hold"; exit 0; fi
+          exit "$rc"

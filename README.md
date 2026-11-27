@@ -74,11 +74,12 @@ Those pins are not published yet. Until they are, a release is still verified ag
 - `.github/workflows/pipeline.yml` (daily, and on demand) fetches CISA KEV and the OSV.dev export of OpenSSF
   malicious-package (`MAL-`) records for npm and PyPI over HTTPS, records each source's HTTP status, response
   SHA-256 and date, then builds and validates the **unsigned** files and shards, and uploads them as a workflow
-  artifact. The build refuses a manifest over 5 MB or a shard over 5 MB gzipped.
-  CI holds no signing key and no secrets.
+  artifact. The build refuses a manifest over 5 MB or a shard over 5 MB gzipped. A pipeline health check then
+  confirms shard hashes, canaries, silent sources and dates; a failure fails the job, and a size jump of more
+  than 50% holds the release for review. CI holds no signing key and no secrets.
 - The owner signs and publishes with `scripts/sign-and-release.sh`, which re-validates the artifact, checks it
   against the live release (newer `generated_at`, no dropped revocations), stops on the circuit breaker, signs
-  with `ssh-keygen -Y sign` and creates the release.
+  with `ssh-keygen -Y sign`, runs the same health check on the signed files, and creates the release.
 - Malicious entries on popular package names are held at Caution (`pending_review`) until the owner approves
   them in `review/popular-approvals.json`, and approval also needs two distinct upstream origins.
 - Python standard library only; no third-party packages. All GitHub Actions are pinned to full commit SHAs.

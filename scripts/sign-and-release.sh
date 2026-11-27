@@ -3,8 +3,8 @@
 # The private key never leaves the owner's machine; CI only builds unsigned files.
 #
 # Usage:
-#   scripts/sign-and-release.sh --run-id <id>   [--key PATH] [--accept-breaker] [--bootstrap] [--dry-run]
-#   scripts/sign-and-release.sh --from-dir DIR  [--key PATH] [--accept-breaker] [--bootstrap] [--dry-run]
+#   scripts/sign-and-release.sh --run-id <id>   [--key PATH] [--accept-breaker] [--accept-health] [--bootstrap] [--dry-run]
+#   scripts/sign-and-release.sh --from-dir DIR  [--key PATH] [--accept-breaker] [--accept-health] [--bootstrap] [--dry-run]
 #
 # Key: --key PATH or env KT_SIGNING_KEY_PATH. The path and the key are never printed.
 # Steps: get the unsigned artifact -> validate -> check against the live release (signature +
@@ -24,7 +24,7 @@ POINTER_TAG="kt-latest"
 GH="${KT_GH:-gh}"
 FILES=(latest.json iocs.json conformance.json stats.json manifest.json)
 
-RUN_ID="" FROM_DIR="" KEY="${KT_SIGNING_KEY_PATH:-}" ACCEPT_BREAKER=0 BOOTSTRAP=0 DRY_RUN=0
+RUN_ID="" FROM_DIR="" KEY="${KT_SIGNING_KEY_PATH:-}" ACCEPT_BREAKER=0 ACCEPT_HEALTH=0 BOOTSTRAP=0 DRY_RUN=0
 die() { echo "sign-and-release: REFUSED: $*" >&2; exit 1; }
 
 # Prints "present" or "absent". Only gh's explicit "release not found" counts as absent; any other failure
@@ -42,6 +42,7 @@ while [ $# -gt 0 ]; do
     --from-dir) FROM_DIR="${2:?}"; shift 2 ;;
     --key) KEY="${2:?}"; shift 2 ;;
     --accept-breaker) ACCEPT_BREAKER=1; shift ;;
+    --accept-health) ACCEPT_HEALTH=1; shift ;;
     --bootstrap) BOOTSTRAP=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "unknown argument" ;;
@@ -142,6 +143,22 @@ for f in "${FILES[@]}"; do
 done
 "${PY[@]}" -m kt.verify "$ART" --allowed-signers "$ALLOWED" --max-age-hours 87600 --require-shards "${NOW_ARGS[@]}" >/dev/null || [ $? -eq 3 ] \
   || die "our own signatures or shards did not verify"
+
+# 5b. Pipeline health check (SPEC.md §7.5). A failure blocks publish. A size-jump hold
+# needs --accept-health after a person reviews.
+health_args=("$ART" --signed --out "$ART/pipeline-health.json")
+if [ "$HAVE_PREV" -eq 1 ]; then health_args+=(--previous "$PREV"); fi
+set +e
+"${PY[@]}" -m kt.health "${health_args[@]}" "${NOW_ARGS[@]}"
+health_rc=$?
+set -e
+if [ "$health_rc" -eq 1 ]; then
+  die "pipeline health check failed; not publishing"
+fi
+if [ "$health_rc" -eq 2 ]; then
+  [ "$ACCEPT_HEALTH" -eq 1 ] || die "pipeline health hold (size jump); a person must review, then rerun with --accept-health"
+  echo "sign-and-release: health hold accepted by operator"
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   OUT="${KT_DRY_RUN_OUT:-}"

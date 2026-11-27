@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.6, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.7, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -391,27 +391,31 @@ keys.json is published. That file is not published yet.
 
 ### 7.5 Watchdog and daily pipeline health check
 
-Today, an hourly watchdog fails, and so alerts SoundMinds, if the signed list is more than 26 hours old. Until
-the first release exists, it passes with a notice.
+An hourly watchdog fails, and so alerts SoundMinds, if the signed list is more than 26 hours old. Until
+the first release exists, it passes with a notice. That hourly run also checks canaries and dates on the
+pointer files it already downloads; it does not re-download every shard each hour.
 
-**Planned, not built yet:** a daily pipeline health check that extends the watchdog and runs after each daily
-build. It will check:
+A daily pipeline health check runs after each daily build, and again at sign-and-release after the files are
+signed. It checks:
 
-- **Build:** today's `latest.json`, `manifest.json` and every shard were built and released, with every shard's
-  SHA-256 matching the manifest.
-- **Signing:** both verify against the current allowed-signers key, and the canary entries are present.
+- **Build:** today's `latest.json`, `manifest.json` and every shard were built, with every shard's SHA-256
+  matching the manifest.
+- **Signing:** at sign-and-release, the files verify against the current allowed-signers key, and the canary
+  entries are present. The unsigned CI build checks canaries and leaves signatures to sign-and-release.
 - **No source went silent.** A source fails if its fetch failed, if it returned zero entries when it shouldn't,
   or if it added nothing for longer than its usual gap. The starting gaps are 3 days for OSV `MAL-` records and
-  14 days for CISA KEV. They will be tuned from 30 days of history, and the final numbers recorded in this repo.
+  14 days for CISA KEV, recorded in `config/limits.json` under `pipeline_health`. They will be tuned from 30
+  days of history.
 - **Size caps:** the build already refuses a manifest over 5 MB or a shard over 5 MB gzipped (§6.5). The health
-  check will also hold for review a jump of more than 50% from one day to the next, in total size or in any
-  shard.
-- **Stale dates:** `generated_at` must be today's date (UTC) and not in the future, and every entry's
-  `first_seen` must be on or before `generated_at`. If there is no new release within 26 hours, SoundMinds is
-  alerted. After 48 hours with no release, clients answer Unknown for list matches on their own (§6.4).
+  check also holds for review a jump of more than 50% from one day to the next, in total size or in any shard.
+- **Stale dates:** `generated_at` must be today's date (UTC) and not in the future when the daily build runs,
+  and every entry's `first_seen` must be on or before `generated_at`. If there is no new release within 26
+  hours, SoundMinds is alerted. After 48 hours with no release, clients answer Unknown for list matches on
+  their own (§6.4).
 
-On any failure there is no release that day. The last good file stays live and keeps aging toward the 48-hour
-Unknown point, and SoundMinds is alerted.
+On any failure there is no release that day. A size-jump hold also blocks publish until a person reviews and
+reruns sign-and-release with `--accept-health`. The last good file stays live and keeps aging toward the
+48-hour Unknown point, and SoundMinds is alerted.
 
 ### 7.6 Stats (`stats.json`)
 
@@ -532,3 +536,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 | 1.4 | 2026-11-26 | Builds the sharded list (§6.5): `manifest.json` (signed) and 518 shards, npm and PyPI split by the first byte of SHA-256(`match_key`), one shard each for KEV and the other types, with 5 MB caps enforced by the build and validator. Adds the first-run connectivity check (§4D) and its pre-send rule (§10.1), with conformance cases. States the signature-file size limit and the allowed-signers option rules (§7.3). |
 | 1.5 | 2026-11-27 | Adds §7.3A: the format and verifier for a signed `keys.json` that will name the current and next daily signing keys, with a 90-day validity window, `revoked_keys`, and signature namespace `kings-taster-keys`. The first signed `keys.json` and the master public-key pins are not published yet. Until they are, daily files still verify against `config/allowed_signers`, and a `keys.json` that is present is refused. A `keys.json` must be 64 KiB or smaller (65,536 bytes), and its `generated_at` may not be more than 5 minutes ahead. |
 | 1.6 | 2026-11-27 | Once the master public-key pins are published, a release with no `keys.json` is refused (the bot will treat the list as unverifiable and answer Unknown). Until the pins are published, a release can still be verified without a `keys.json`, and a `keys.json` that is present is refused. |
+| 1.7 | 2026-11-27 | Builds the daily pipeline health check (§7.5): after each daily build, and again at sign-and-release, it checks shard hashes, canaries, silent sources (starting gaps: 3 days for OSV `MAL-` records, 14 days for CISA KEV), date freshness, and a 50% size-jump hold. The hourly watchdog still alerts after 26 hours and also checks canaries and dates on the pointer files. |
