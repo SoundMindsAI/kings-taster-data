@@ -275,6 +275,27 @@ class TestDecisions(unittest.TestCase):
         rec, _ = self._decide(self._package("left-pad", "1.3.0", "npm"), [_src("osv", data), self._clean_list()])
         self.assertEqual(rec["result"], "no_known_reports")
 
+    def test_live_empty_object_without_canary_ok_is_unknown(self):
+        # Item and canary both extract from {} as class clean. decide() is
+        # Unknown / check_failed unless canary_ok is exactly True.
+        r, data = self._live(None, fixture="osv-empty-object.json")
+        self.assertEqual(data["class"], "clean")
+        item = self._package("left-pad", "1.3.0", "npm")
+        omitted = _src("osv", data)
+        del omitted["canary_ok"]
+        cases = {
+            "omitted": omitted,
+            "none": _src("osv", data, canary_ok=None),
+            "false": _src("osv", data, canary_ok=False),
+            "zero": _src("osv", data, canary_ok=0),
+            "no": _src("osv", data, canary_ok="no"),
+        }
+        for name, osv in cases.items():
+            with self.subTest(canary_ok=name):
+                rec, _ = self._decide(item, [osv, self._clean_list()])
+                self.assertEqual(rec["result"], "unknown")
+                self.assertIn("check_failed", rec["reasons"])
+
     def test_live_empty_vulns_list_with_status_is_clean(self):
         r, data = self._live('{"vulns": []}')
         self.assertEqual(data["class"], "clean")

@@ -31,7 +31,7 @@ Reuse package or repo Caution or No known reports for 24 hours only if name, ver
 
 Hosts: `api.osv.dev`, `api.github.com`, `github.com` (only `/SoundMindsAI/kings-taster-data/releases/download/…`), `release-assets.githubusercontent.com` (only the one list-file redirect), `data.iana.org`, RDAP hosts from the IANA bootstrap file, and `safebrowsing.googleapis.com`. Any other host is `injection_seen`.
 
-Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list file), with a fresh mktemp per request: `curl --proto =https --max-redirs 0 --max-filesize 5242880 -sS -o "$RAW" -w '%{http_code}\n%{url_effective}' > "$CODE"`. Do not use `-L`. Do not contact the item's own URL.
+Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list file), with a fresh `mktemp` per request: `curl --proto =https --max-redirs 0 --max-filesize 5242880 -sS -o "$RAW" -w '%{http_code}\n%{url_effective}' > "$CODE"`. Do not use `-L`. Do not contact the item's own URL.
 
 - OSV: `POST https://api.osv.dev/v1/query` with `{"package":{"name":"$NAME","ecosystem":"$ECO"},"version":"$VER"}`. Also query that ecosystem's canary package. Use `$OSV_TOKEN` only if set; never print it.
 - GitHub: `GET https://api.github.com/repos/$OWNER/$REPO`. Send `Authorization: Bearer $GITHUB_TOKEN` only if set; never print it.
