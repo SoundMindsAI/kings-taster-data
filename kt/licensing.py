@@ -1,6 +1,7 @@
 """Load the public licensing table (sources/licensing.json) and list the feeds it allows."""
 import json
 import os
+import re
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 TABLE = os.path.join(ROOT, "sources", "licensing.json")
@@ -26,8 +27,10 @@ def load_table(path=None):
 def problems(doc):
     """Return a list of problems in the table. An empty list means the table is well-formed."""
     errors = []
-    if doc.get("checked_on") and not isinstance(doc["checked_on"], str):
-        errors.append("checked_on must be a string")
+    if "checked_on" in doc:
+        val = doc["checked_on"]
+        if not isinstance(val, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", val):
+            errors.append("checked_on must be a YYYY-MM-DD date")
     seen = set()
     for i, row in enumerate(doc.get("sources") or []):
         if not isinstance(row, dict):

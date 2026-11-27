@@ -62,3 +62,11 @@ class TestLicensingTable(unittest.TestCase):
         allowed = set(L.feed_urls(self.doc))
         self.assertEqual(allowed, {sources.KEV["url"], sources.OSV["npm"]["url"], sources.OSV["PyPI"]["url"]})
 
+    def test_checked_on_falsy_values_refused(self):
+        for bad in (0, None, "", False):
+            doc = dict(self.doc)
+            doc["checked_on"] = bad
+            errs = L.problems(doc)
+            self.assertTrue(any("checked_on" in e for e in errs),
+                            "checked_on=%r should be refused, got %r" % (bad, errs))
+
