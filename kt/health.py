@@ -281,7 +281,7 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
 
 
 def _expected_canary_keys(root):
-    """Sorted match_key values of the fixed list canaries in config/canaries.json,
+    """Sorted (type, match_key) pairs of the fixed list canaries in config/canaries.json,
     or None when the file is missing, unreadable or empty (the check must fail)."""
     return list_canary_pairs(root)
 

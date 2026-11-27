@@ -717,6 +717,21 @@ class TestClientHealth(SignedCacheCase):
                 doc["shards"][0]["gzip_bytes"] = bad
             self.assertIsNotNone(H._caps_ok(self.cache, doc, verified=True), repr(bad))
 
+    def test_verified_caps_use_a_distinct_message_for_zero_or_negative_gzip_bytes(self):
+        self.seed_cache(shards=1)
+        man = load(os.path.join(self.cache, "manifest.json"))
+        missing = json.loads(json.dumps(man))
+        del missing["shards"][0]["gzip_bytes"]
+        missing_msg = H._caps_ok(self.cache, missing, verified=True)
+        self.assertIn("no signed gzip size", missing_msg)
+        self.assertNotIn("invalid signed gzip size", missing_msg)
+        for bad in (0, -1):
+            doc = json.loads(json.dumps(man))
+            doc["shards"][0]["gzip_bytes"] = bad
+            detail = H._caps_ok(self.cache, doc, verified=True)
+            self.assertIn("invalid signed gzip size", detail, repr(bad))
+            self.assertNotEqual(detail, missing_msg, repr(bad))
+
     def test_unverified_caps_still_recompress_the_shard_file(self):
         self.seed_cache(shards=1)
         man = load(os.path.join(self.cache, "manifest.json"))
