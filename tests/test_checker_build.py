@@ -49,7 +49,8 @@ class TestWording(unittest.TestCase):
             "rate_limited", "checker_failed", "check_failed", "canary_ok", "tamper-proof",
             "Never say \"safe\"", "~/.kings-taster/findings/", "~/.kings-taster/state.json",
             "SPEC.md §10.1", "weekly",
-            "next_page_token", "the list file and RDAP still run",
+            "next_page_token", "partial page set", "the list file and RDAP still run",
+            "a link-reputation source", "Checklist mode still verifies",
             "source_build_required", "lookalike", "health.json",
         ):
             self.assertIn(needle, text, needle)

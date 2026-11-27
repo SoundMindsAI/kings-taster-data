@@ -6,7 +6,7 @@ Never say "safe". Never print or summarize a key. Never read a raw response or R
 
 ## Goal
 
-Write one Python 3 file, `~/.kings-taster/checker.py`, using only the standard library. No package installs, no third-party packages, no SoundMinds code downloaded or run. You write the file yourself from this build spec and the reference snippets below. The checker is optional: it is offered at first run and is never on by default.
+Write one Python 3 file, `~/.kings-taster/checker.py`, using only the standard library. Don't install packages, use third-party packages, or download or run any SoundMinds code. You write the file yourself from this build spec and the reference snippets below. The checker is optional: it is offered at first run and is never on by default.
 
 ## Command line
 
@@ -35,16 +35,16 @@ Keep or print only the allowlisted, validated fields in the `field_allowlists` s
 
 Precedence: Block, then Unknown, then Caution, then No known reports. Every required source still runs; show every Block and Caution. Use the checklist rules:
 
-- Package: live OSV (its canary must pass) and a verified list. Repo: GitHub API metadata and a verified list. Link: a verified list, RDAP, and Safe Browsing.
+- Package: live OSV (its canary must pass) and a verified list. Repo: GitHub API metadata and a verified list. Link: a verified list, RDAP, and a link-reputation source.
 - A live OSV `MAL-` id or alias is Block. Other OSV hits are Caution, with "upgrade to ≥ X" if a fixed version is known.
 - On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live `MAL-` is held at Caution: "reported malicious by OSV, pending review".
 - A verified list hit with `review_state` pending_review is Caution. Every other list hit is Block, including a list canary.
 - A missing or failed required source is Unknown. A 403 or 429 is `rate_limited` (Unknown, "try again later"). An unset optional source is "not set up". With no link-reputation source set up, a link is Unknown with the distinct wording in `kings-taster-check`; the list file and RDAP still run, and any Block or Caution they find is shown.
-- An unverified list is Unknown (`unverified_list`). Live OSV Blocks and Cautions still show. "No known reports" is then impossible.
+- An unverified list is Unknown (`unverified_list`). Live OSV Blocks and Cautions still show, but the result can't be "No known reports".
 - A package without a wheel is Caution (`source_build_required`) and is never built. A lookalike name is Caution (`lookalike`).
-- Paging follows OSV's `next_page_token`.
+- Follow OSV's `next_page_token` to the last page. If a page has a token you don't follow, that source has failed. Never treat a partial page set as clean.
 - If `~/.kings-taster/health.json` is failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
-- Never reuse a Block, an Unknown, or a link.
+- Never reuse Block or Unknown. Never cache a link.
 
 ## Canaries
 
@@ -52,7 +52,7 @@ Every OSV batch includes the fixed known-vulnerable package for each ecosystem. 
 
 ## Signature check
 
-Verify the signed list by running `ssh-keygen -Y verify` (or openssl), exactly as `kings-taster-check` and `scripts/verify.sh` do: `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE`, then the SHA-256 checks, `--state` rollback refusal, and the 64 KiB signature cap. Do not write your own verifier. Call the existing one.
+Verify the signed list by running `ssh-keygen -Y verify` (or openssl), exactly as `kings-taster-check` and `scripts/verify.sh` do: `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE`, then the SHA-256 checks, `--state` rollback refusal, and the 64 KiB signature cap. Do not write your own verifier. Call the existing one. Checklist mode uses this same verifier.
 
 ## URLs and keys
 
@@ -79,7 +79,7 @@ Recompute the SHA-256 and compare it to the approved one. If it differs, use che
 
 ## Fallback
 
-If the checker fails its tests, is missing, has changed, or crashes, use checklist mode. If checklist mode can finish the check, use that result. Any item checklist mode can't fully check is Unknown. Two cases are always Unknown without a passing checker: Safe Browsing canonicalization, if its test vectors fail in checklist mode; and signature verification. Use the reason code `checker_failed` only when the checker itself failed and the fallback cannot finish the check.
+If the checker fails its tests, is missing, has changed, or crashes, use checklist mode. If checklist mode can finish the check, use that result. Any item checklist mode can't fully check is Unknown. Checklist mode still verifies the list with the same verifier; an unverifiable list is Unknown (`unverified_list`). Without a passing checker, Safe Browsing canonicalization is always Unknown when its test vectors fail in checklist mode. Use the reason code `checker_failed` only when the checker itself failed and the fallback cannot finish the check.
 
 ## Honesty
 
