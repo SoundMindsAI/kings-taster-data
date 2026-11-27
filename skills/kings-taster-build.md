@@ -65,9 +65,9 @@ Verify the signed list with the existing verifier, exactly as `kings-taster-chec
 
 ## URLs and keys
 
-Match every URL by `match_key` of its canonical URL, plus its domain and IP keys. `canonicalize_url` implements Google's Safe Browsing URL canonicalization, and every vector in `canonicalization_vectors` must pass. The signed release file is `conformance.json`; `conformance/cases.json` is the in-repo development copy of the cases. Before canonicalizing, `canonicalize_url` refuses (raises) any link that is not `http://` or `https://`, or that has a backslash, an encoded `%5c`, a space or control character, or an empty host in the authority. A live (`strict`) link is also refused if the authority contains `%`, if the host has any byte at or above 0x80 (never convert an IDN host to Punycode), if the host has `[` or `]`, if it looks numeric but is not a valid IPv4 address, if the host has a leading dot or an empty label, or if its last label is all digits unless the host is a valid IPv4 address. Never map a refused link to a best-guess host. If `canonicalize_url` refuses, the check is Unknown (`injection_seen`). `match_key` must agree with SPEC.md §6.2: npm lowercased, PyPI PEP 503, domains IDNA and lowercase, `url-sha256:` plus the SHA-256 of the canonical URL bytes, and typed prefixes `npm:`, `pypi:`, `cve:`, `domain:`, `ip:`, `hash:`, `github:`, `url-sha256:`.
+Match every URL by `match_key` of its canonical URL, plus its domain and IP keys. `canonicalize_url` implements Google's Safe Browsing URL canonicalization, and every vector in `canonicalization_vectors` must pass. The signed release file is `conformance.json`; `conformance/cases.json` is the in-repo development copy of the cases. Before canonicalizing, `canonicalize_url` refuses (raises) any link that is not `http://` or `https://`, or that has a backslash, an encoded `%5c`, a space or control character, or an empty host in the authority. A live (`strict`) link is also refused if the authority contains `%`, if the host has any byte at or above 0x80 (never convert an IDN host to Punycode), if the host has `[` or `]`, if it looks numeric but is not a valid IPv4 address, if the host has a leading dot or an empty label after trailing dots are stripped, or if its last label is all digits unless the host is a valid IPv4 address. Never map a refused link to a best-guess host. If `canonicalize_url` refuses, the check is Unknown (`injection_seen`). `match_key` must agree with SPEC.md §6.2: npm lowercased, PyPI PEP 503, domains IDNA and lowercase, `url-sha256:` plus the SHA-256 of the canonical URL bytes, and typed prefixes `npm:`, `pypi:`, `cve:`, `domain:`, `ip:`, `hash:`, `github:`, `url-sha256:`.
 
-Read keys only from `~/.kings-taster/keys.env` (`chmod 600`) as environment variables. Never print or summarize a key. Send a Safe Browsing key with `printf 'x-goog-api-key: %s\n' "$KEY" | curl -H @- ...` so it never appears in argv or the URL, and never print, log or echo it.
+Read keys only from `~/.kings-taster/keys.env` (`chmod 600`) as environment variables. Never print or summarize a key. Before using a Safe Browsing key, require it to match `^[A-Za-z0-9_-]{1,128}$`; otherwise that source has failed, and the key is never printed. Send a matching key with `printf 'x-goog-api-key: %s\n' "$KEY" | curl -H @- --data @FILE ...` so it never appears in argv or the URL. `-H @-` uses stdin, so the POST body must be `--data @FILE`. Never print, log or echo the key.
 
 ## Build steps
 
@@ -154,7 +154,7 @@ def canonicalize_url(url, strict=True):
     if b"@" in host:
         host = host.rsplit(b"@", 1)[1]
     host = re.sub(rb":[0-9]*$", b"", host)
-    if strict and host and any(not p for p in (host[:-1] if host.endswith(b".") else host).split(b".")):
+    if strict and host and any(not p for p in host.rstrip(b".").split(b".")):
         raise ValueError("leading dot or empty label in host")
     host = re.sub(rb"\.+", b".", host).strip(b".")
     host = bytes(c + 32 if 65 <= c <= 90 else c for c in host)

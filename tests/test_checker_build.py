@@ -94,10 +94,10 @@ class TestCanonicalize(unittest.TestCase):
             except ValueError:
                 refused += 1
                 auth = re.split(rb"[/?]", raw.split(b"://", 1)[-1], maxsplit=1)[0]
-                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw) or b"%" in auth or b".." in auth, v["input"])
+                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw) or b"%" in auth, v["input"])
                 continue
             self.assertEqual(got.encode("latin-1"), B.decode_c_escapes(v["expected"]), v["input"])
-        self.assertGreaterEqual(refused, 4)
+        self.assertEqual(refused, 6)
 
     def test_vectors_pass_non_strict(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
@@ -112,6 +112,7 @@ class TestCanonicalize(unittest.TestCase):
             "http://evil.com%255c@192.0.2.1/", "javascript:alert(1)", "http:/evil.com/x",
             "http:evil.com/x", "https:///evil.com/x", "http:///", "ftp://example.com/",
             "http://exa\x01mple.com/", "http://exa mple.com/", "http://evil.com%2f@192.0.2.1/",
+            "http://evil.com%253f@192.0.2.1/", "http://évil.com/", "http://[::1]/", "http://1.2.3.256/",
         ):
             with self.assertRaises(ValueError, msg=bad):
                 canon(bad)
@@ -153,6 +154,8 @@ class TestCanonicalize(unittest.TestCase):
     def test_dots_follow_google_rules(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
         self.assertEqual(canon("http://evil.com./"), "http://evil.com/")
+        self.assertEqual(canon("http://evil.com../"), "http://evil.com/")
+        self.assertEqual(canon("http://www.google.com.../"), "http://www.google.com/")
         for u in ("http://.evil.com/", "http://evil..com/", "http://.1.2.3.4/", "http://1..2/"):
             with self.assertRaises(ValueError, msg=u):
                 canon(u)
@@ -342,6 +345,13 @@ class TestRegexParityAndKeys(unittest.TestCase):
         self.assertIn("never appears in argv", text_of("kings-taster-check.md"))
         self.assertIn("never appears in argv", B.skill_text())
         self.assertIn("never appears in argv or the URL", B.skill_text())
+
+    def test_skills_state_key_rules(self):
+        for name in ("kings-taster-check.md", "kings-taster-build.md"):
+            text = text_of(name)
+            for needle in ("^[A-Za-z0-9_-]{1,128}$", "that source has failed", "the key is never printed",
+                           "--data @FILE", "`-H @-` uses stdin", "the POST body must be `--data @FILE`"):
+                self.assertIn(needle, text, (name, needle))
 
     def test_skill_states_strict_refusals(self):
         text = B.skill_text()
