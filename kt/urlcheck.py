@@ -12,7 +12,6 @@ LIST_PATH_PREFIX = "/SoundMindsAI/kings-taster-data/releases/download/"
 LIST_HOSTS = frozenset({"github.com", "release-assets.githubusercontent.com"})
 # '[' and ']' are out: only DNS names are accepted. ':' is out: no explicit port.
 _BAD_AUTHORITY = frozenset("\\;\t\r\n @?#:[]")
-_WHITESPACE = frozenset(" \t\r\n")
 
 
 def is_url(value):
@@ -32,6 +31,8 @@ def _check_authority(authority):
 
 def bare_host(value):
     """Lowercase a bare host argument, or raise ValueError if it is not a plain name."""
+    if not isinstance(value, str):
+        raise ValueError("bad authority")
     _check_authority(value)
     return value.lower()
 
@@ -42,6 +43,8 @@ def split_url(url):
     The hostname is the one urlsplit reports and the raw authority must equal the
     netloc urlsplit parsed, so no parser can read a different host from the same text.
     """
+    if not isinstance(url, str):
+        raise ValueError("unparsable")
     try:
         parts = urlsplit(url)
         parts.port  # a bad port such as ':-0' raises here
@@ -136,7 +139,7 @@ def official_link_ok(url, allowed_hosts):
     """
     if "\\" in url or re.search(r"%2e|%2f|%5c", url, re.IGNORECASE):
         return "encoded dot, slash or backslash", None, None
-    if any(c in _WHITESPACE for c in url):
+    if not all("\x21" <= c <= "\x7e" for c in url):
         return "whitespace or control character", None, None
     try:
         scheme, host, path = split_url(url)

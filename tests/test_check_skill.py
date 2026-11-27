@@ -91,6 +91,15 @@ class TestSkillCaps(unittest.TestCase):
         self.assertIn("--max-redirs 1", self.commands)
         self.assertIn("Do not contact the item's own URL", self.commands)
 
+    def test_fetch_line_pins_limits_and_temps(self):
+        line = next((ln for ln in self.commands.splitlines()
+                     if "Fetch (except the list file)" in ln), None)
+        self.assertIsNotNone(line)
+        for needle in ("--max-filesize 5242880", "--max-redirs 0",
+                       "%{exitcode}", "$RAW", "$CODE", "mktemp",
+                       "removed after use", "exit code 0"):
+            self.assertIn(needle, line, needle)
+
     def test_body_does_not_say_safe_except_the_ban_and_the_product_name(self):
         self.assertFalse(C.body_banned_words(self.body))
 

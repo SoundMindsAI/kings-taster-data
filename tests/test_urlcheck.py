@@ -52,7 +52,7 @@ class TestSharedUrlParser(unittest.TestCase):
 
     def test_host_allowed_refuses_what_the_parser_refuses(self):
         for label, url, expected in LIST_CASES:
-            if url.startswith("http://") or label == "dotdot":
+            if label == "dotdot":
                 continue
             with self.subTest(label):
                 self.assertEqual(C.host_allowed(url), expected)
@@ -108,6 +108,48 @@ class TestSharedUrlParser(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 U.bare_host(bad)
         self.assertEqual(U.bare_host("GitHub.com"), "github.com")
+
+    def test_non_str_input_is_refused(self):
+        bad = b"evil" + AT.encode() + b"github.com"
+        with self.assertRaises(ValueError):
+            U.bare_host(bad)
+        with self.assertRaises(ValueError):
+            U.split_url(bad)
+        self.assertIsNone(U.parse_https_url(bad))
+        self.assertFalse(U.same_host(bad, OFFICIAL))
+
+    def test_scheme_must_be_https(self):
+        self.assertFalse(C.host_allowed("http://github.com" + LP))
+        self.assertFalse(C.host_allowed("ftp://api.osv.dev/v1/query"))
+        self.assertFalse(C.host_allowed("github.com", "http://github.com" + LP))
+        self.assertFalse(C.host_allowed("http://release-assets.githubusercontent.com/x/y", list_redirect=True))
+        self.assertTrue(C.host_allowed("https://release-assets.githubusercontent.com/x/y", list_redirect=True))
+        self.assertTrue(C.host_allowed("//github.com" + LP))
+
+    def test_two_full_urls_check_both_paths(self):
+        dotdot = "https://github.com/SoundMindsAI/kings-taster-data/releases/download/../../x/y"
+        self.assertFalse(C.host_allowed(dotdot))
+        self.assertFalse(C.host_allowed(OFFICIAL, dotdot))
+        self.assertFalse(C.host_allowed(dotdot, OFFICIAL))
+        self.assertTrue(C.host_allowed(OFFICIAL, "https://GitHub.com" + LP + ".sig"))
+
+    def test_bare_path_controls_are_refused(self):
+        for ch in ("\x00", "\r", "\n", "\t", "\x0b", "\x7f", " "):
+            with self.subTest(ch=repr(ch)):
+                self.assertFalse(C.host_allowed("github.com", LP + ch))
+                self.assertFalse(C.host_allowed("github.com", LP + ch + "x"))
+                self.assertFalse(C.host_allowed("api.osv.dev", "/v1/query" + ch))
+                self.assertFalse(C.host_allowed("github.com" + ch, LP))
+        self.assertTrue(C.host_allowed("github.com", LP))
+
+    def test_official_link_refuses_non_printable(self):
+        hosts = finding.EXPLANATION_URL_HOSTS
+        for ch in ("\x00", "\x0b", "\x7f", " ", " "):
+            url = "https://osv.dev/vulnerability/X" + ch + "Y"
+            with self.subTest(ch=repr(ch)):
+                self.assertEqual(finding.official_url_problem(url, hosts),
+                                 "whitespace or control character")
+                self.assertIsNotNone(U.official_link_ok(url, hosts)[0])
 
 
 if __name__ == "__main__":
