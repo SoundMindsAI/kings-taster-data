@@ -2,14 +2,18 @@
 
 ## Reporting a vulnerability
 
-Please report security flaws privately through GitHub's private vulnerability reporting:
+Please report security flaws privately, in either of these ways.
+
+Through GitHub's private vulnerability reporting:
 
 1. Go to this repo's **Security** tab.
 2. Choose **Report a vulnerability** (or open
    <https://github.com/SoundMindsAI/kings-taster-data/security/advisories/new>).
 3. Describe the flaw, how to reproduce it, and what it affects.
 
-Only you and the repo maintainers can see the report. Please don't open a public issue or pull request for a
+Or by email to support@soundminds.ai, with "Security" in the subject line. This works without a GitHub account.
+
+Either way, only you and SoundMinds can see the report. Please don't open a public issue or pull request for a
 security flaw, and don't include real secrets or anyone's personal data in the report.
 
 ## What's in scope
