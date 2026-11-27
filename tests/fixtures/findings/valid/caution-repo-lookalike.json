@@ -1,0 +1,34 @@
+{
+ "finding_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+ "checked_at": "2026-11-26T23:40:00Z",
+ "template_version": "1.0.0",
+ "mode": "checklist",
+ "checker_sha256": null,
+ "item_type": "repo",
+ "indicator_defanged": "github:someone/some-repo",
+ "result": "caution",
+ "reasons": [
+  "lookalike"
+ ],
+ "checked_against": [
+  {
+   "source": "github_api",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  },
+  {
+   "source": "kings_taster_list",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  }
+ ],
+ "matched_entries": [],
+ "fixed_version": null,
+ "explanation": "Caution. The owner name looks like a well-known project's, from the GitHub API (https://github.com/advisories, 2026-11-26)."
+}

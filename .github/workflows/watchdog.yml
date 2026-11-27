@@ -1,0 +1,31 @@
+# Watchdog (SPEC.md §7.5): fails, and so alerts the repo admins, when the signed list is over 26 hours old.
+name: watchdog
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the live signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p live
+          gh release download kt-latest --repo "$GITHUB_REPOSITORY" --pattern latest.json --pattern latest.json.sig --dir live
+          tag="$(python3 -E -s -c 'import json;print(json.load(open("live/latest.json"))["tag"])')"
+          [[ "$tag" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "bad tag"; exit 1; }
+          for f in iocs.json conformance.json stats.json; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$f" --pattern "$f.sig" --dir live
+          done
+          python3 -E -s -m kt.verify live --allowed-signers config/allowed_signers --max-age-hours 26

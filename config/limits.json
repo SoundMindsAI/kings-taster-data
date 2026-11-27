@@ -1,0 +1,13 @@
+{
+  "comment": "Circuit breaker (see SPEC.md, Pipeline). Tripping does not stop CI: it marks the build needs_human, and sign-and-release.sh refuses to publish it without --accept-breaker.",
+  "max_added_per_run": 2000,
+  "max_removed_per_run": 200,
+  "max_revoked_per_run": 50,
+  "min_entries": {"osv-npm": 100000, "osv-pypi": 5000, "cisa-kev": 1000},
+  "max_download_bytes": {"cisa-kev": 52428800, "osv-npm": 1073741824, "osv-pypi": 268435456},
+  "max_zip_member_bytes": 1048576,
+  "max_zip_total_uncompressed_bytes": 4294967296,
+  "max_versions_per_entry": 500,
+  "freshness_hours": 48,
+  "watchdog_hours": 26
+}

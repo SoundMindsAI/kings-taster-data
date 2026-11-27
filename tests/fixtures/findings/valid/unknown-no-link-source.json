@@ -1,0 +1,50 @@
+{
+ "finding_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+ "checked_at": "2026-11-26T23:40:00Z",
+ "template_version": "1.0.0",
+ "mode": "checklist",
+ "checker_sha256": null,
+ "item_type": "link",
+ "indicator_defanged": "hxxps://evil[.]example/login",
+ "result": "unknown",
+ "reasons": [
+  "no_link_source"
+ ],
+ "checked_against": [
+  {
+   "source": "kings_taster_list",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  },
+  {
+   "source": "iana_rdap_bootstrap",
+   "required": false,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  },
+  {
+   "source": "rdap",
+   "required": true,
+   "status": "ok",
+   "http_status": 200,
+   "response_sha256": "abababababababababababababababababababababababababababababababab",
+   "source_date": "2026-11-26T10:00:00Z"
+  },
+  {
+   "source": "safe_browsing",
+   "required": true,
+   "status": "not_configured",
+   "http_status": null,
+   "response_sha256": null,
+   "source_date": null
+  }
+ ],
+ "matched_entries": [],
+ "fixed_version": null,
+ "explanation": "Unknown. I can't check links until a link-reputation source is set up. Don't proceed. Say 'set up link checks' to add one."
+}

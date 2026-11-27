@@ -1,0 +1,6 @@
+# Every change needs a SoundMinds owner review. Hold-queue approvals and pause/unpause are the owner's.
+* @SoundMindsAI
+/review/popular-approvals.json @SoundMindsAI
+/review/control.json @SoundMindsAI
+/config/allowed_signers @SoundMindsAI
+/.github/ @SoundMindsAI

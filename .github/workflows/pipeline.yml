@@ -1,0 +1,93 @@
+# Daily King's Taster data pipeline. Fetches the clearly licensed sources, builds and validates the
+# UNSIGNED release files and uploads them as the workflow artifact "kt-release-unsigned".
+# No signing happens in CI: the private key stays on a SoundMinds-controlled machine and
+# scripts/sign-and-release.sh signs and publishes. No secrets are used by this workflow.
+name: pipeline
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: "First release only: build without a previous signed release"
+        type: boolean
+        default: false
+      force_pause:
+        description: "Set paused=true in this build (safety direction only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Unit tests (offline)
+        run: python3 -E -s -m unittest discover -s tests -t . -q
+      - name: Fetch sources
+        run: |
+          set -u
+          mkdir -p work/sources
+          python3 -E -s -m kt.fetch_kev --out work/sources/kev.json || echo "cisa-kev fetch failed; build decides"
+          python3 -E -s -m kt.fetch_osv --ecosystem npm --out work/sources/osv-npm.json || echo "osv-npm fetch failed; build decides"
+          python3 -E -s -m kt.fetch_osv --ecosystem PyPI --out work/sources/osv-pypi.json || echo "osv-pypi fetch failed; build decides"
+      - name: Get and verify the previous signed release
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+        run: |
+          set -euo pipefail
+          mkdir -p work/prev
+          if gh release view kt-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release download kt-latest --repo "$GITHUB_REPOSITORY" --pattern latest.json --pattern latest.json.sig --dir work/prev
+            tag="$(python3 -E -s -c 'import json;print(json.load(open("work/prev/latest.json"))["tag"])')"
+            [[ "$tag" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "bad previous tag"; exit 1; }
+            for f in iocs.json conformance.json stats.json; do
+              gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$f" --pattern "$f.sig" --dir work/prev
+            done
+            rc=0; python3 -E -s -m kt.verify work/prev --allowed-signers config/allowed_signers --max-age-hours 87600 || rc=$?
+            if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then echo "previous release does not verify"; exit 1; fi
+            echo "mode=previous" >> "$GITHUB_OUTPUT"
+          elif [ "$BOOTSTRAP" = "true" ]; then
+            echo "mode=bootstrap" >> "$GITHUB_OUTPUT"
+          else
+            echo "No previous release and bootstrap not requested"; exit 1
+          fi
+      - name: Build unsigned release files
+        env:
+          MODE: ${{ steps.prev.outputs.mode }}
+          FORCE_PAUSE: ${{ inputs.force_pause }}
+        run: |
+          set -euo pipefail
+          args=(--sources work/sources --out work/release)
+          if [ "$MODE" = "previous" ]; then args+=(--previous work/prev); else args+=(--bootstrap); fi
+          if [ "$FORCE_PAUSE" = "true" ]; then args+=(--force-pause); fi
+          python3 -E -s -m kt.build "${args[@]}"
+          if [ "$MODE" = "previous" ]; then
+            python3 -E -s -m kt.validate work/release --previous work/prev
+          else
+            python3 -E -s -m kt.validate work/release
+          fi
+          python3 -E -s -m kt.report work/release/build-report.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kt-release-unsigned
+          path: |
+            work/release/latest.json
+            work/release/iocs.json
+            work/release/conformance.json
+            work/release/stats.json
+            work/release/build-report.json
+          if-no-files-found: error
+          retention-days: 7

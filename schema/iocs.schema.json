@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SoundMindsAI/kings-taster-data/schema/iocs.schema.json",
+  "title": "King's Taster list file (iocs.json), SPEC.md §6.2",
+  "description": "No free-text fields. Every string has a strict pattern and length cap. Cross-field rules are in kt/validate.py.",
+  "type": "object", "additionalProperties": false,
+  "required": ["file_type", "schema_version", "generated_at", "tag", "min_template_version", "paused",
+               "paused_reason", "sources", "revoked_entries", "entries", "counts"],
+  "properties": {
+    "file_type": {"const": "iocs"},
+    "schema_version": {"const": 1},
+    "generated_at": {"$ref": "#/$defs/time"},
+    "tag": {"$ref": "#/$defs/tag"},
+    "min_template_version": {"$ref": "#/$defs/semver"},
+    "paused": {"type": "boolean"},
+    "paused_reason": {"enum": [null, "qa_bar_missed", "incident", "maintenance", "manual"]},
+    "sources": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"$ref": "#/$defs/source"}},
+    "revoked_entries": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/revoked"}},
+    "entries": {"type": "array", "maxItems": 2000000, "items": {"$ref": "#/$defs/entry"}},
+    "counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 10000000}}
+  },
+  "$defs": {
+    "time": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "tag": {"type": "string", "pattern": "^kt-\\d{8}T\\d{6}Z$"},
+    "semver": {"type": "string", "pattern": "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "status", "http_status", "response_sha256", "source_date", "fetched_at",
+                   "license", "attribution", "terms_url", "entry_count"],
+      "properties": {
+        "id": {"enum": ["cisa-kev", "osv-npm", "osv-pypi", "kings-taster-canary"]},
+        "status": {"enum": ["ok", "carried_over"]},
+        "http_status": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+        "response_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "source_date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+        "fetched_at": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+        "license": {"type": "string", "pattern": "^[A-Za-z0-9.+ -]{2,60}$"},
+        "attribution": {"type": "string", "pattern": "^[A-Za-z0-9 .,:;()'/+&-]{2,200}$"},
+        "terms_url": {"type": "string", "pattern": "^https://[A-Za-z0-9./_-]{5,200}$"},
+        "entry_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "revoked": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "match_key", "revoked_at", "reason"],
+      "properties": {
+        "id": {"$ref": "#/$defs/entry_id"},
+        "match_key": {"$ref": "#/$defs/match_key"},
+        "revoked_at": {"$ref": "#/$defs/time"},
+        "reason": {"enum": ["dispute_upheld", "false_positive", "withdrawn_upstream", "pipeline_error"]}
+      }
+    },
+    "entry_id": {"type": "string", "pattern": "^(osv:MAL-\\d{4}-\\d{1,8}:(npm|pypi):[a-z0-9@/._~-]{1,214}|kev:CVE-\\d{4}-\\d{4,8}|canary:[a-z_]{2,20}(:[a-z]{2,8})?)$"},
+    "match_key": {"type": "string", "maxLength": 260,
+      "pattern": "^(npm:[a-z0-9@/._~-]{1,214}|pypi:[a-z0-9-]{1,200}|cve:cve-\\d{4}-\\d{4,8}|domain:[a-z0-9.-]{1,253}|ip:[0-9a-f.:]{2,45}|hash:[0-9a-f]{32,128}|github:[a-z0-9-]{1,39}|url-sha256:[0-9a-f]{64})$"},
+    "version": {"type": "string", "pattern": "^[A-Za-z0-9.+_!~-]{1,64}$"},
+    "affected": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "required": ["all_versions", "versions", "ranges"],
+      "properties": {
+        "all_versions": {"type": "boolean"},
+        "versions": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/version"}},
+        "ranges": {"type": "array", "maxItems": 20, "items": {
+          "type": "object", "additionalProperties": false, "required": ["type", "events"],
+          "properties": {
+            "type": {"enum": ["SEMVER", "ECOSYSTEM"]},
+            "events": {"type": "array", "maxItems": 40, "items": {
+              "type": "object", "additionalProperties": false,
+              "properties": {"introduced": {"type": "string", "pattern": "^(0|[A-Za-z0-9.+_!~-]{1,64})$"},
+                             "fixed": {"$ref": "#/$defs/version"},
+                             "last_affected": {"$ref": "#/$defs/version"}}}}}}}
+      }
+    },
+    "label": {"type": ["string", "null"], "maxLength": 120},
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "type", "value", "match_key", "kind", "ecosystem", "affected_versions", "fixed_version",
+                   "vendor", "product", "known_ransomware_use", "aliases", "origins", "confidence",
+                   "upstream_origin", "source_url", "license", "attribution", "published", "modified",
+                   "first_seen", "status", "expires", "review_state", "canary"],
+      "properties": {
+        "id": {"$ref": "#/$defs/entry_id"},
+        "type": {"enum": ["domain", "url", "ip", "hash", "package", "repo_owner", "cve"]},
+        "value": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^[\\x21-\\x7e]+$"},
+        "match_key": {"$ref": "#/$defs/match_key"},
+        "kind": {"enum": ["malicious", "vulnerable"]},
+        "ecosystem": {"enum": [null, "npm", "PyPI"]},
+        "affected_versions": {"$ref": "#/$defs/affected"},
+        "fixed_version": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9.+_!~-]{1,64}$"},
+        "vendor": {"$ref": "#/$defs/label"},
+        "product": {"$ref": "#/$defs/label"},
+        "known_ransomware_use": {"type": ["boolean", "null"]},
+        "aliases": {"type": "array", "maxItems": 20, "uniqueItems": true, "items": {"type": "string",
+          "pattern": "^(CVE-\\d{4}-\\d{4,8}|GHSA(-[23456789cfghjmpqrvwx]{4}){3}|PYSEC-\\d{4}-\\d{1,8}|MAL-\\d{4}-\\d{1,8}|OSV-\\d{4}-\\d{1,8})$"}},
+        "origins": {"type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,40}$"}},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "upstream_origin": {"type": "string", "pattern": "^[a-z0-9][a-z0-9:._+-]{1,300}$"},
+        "source_url": {"type": "string", "maxLength": 300,
+          "pattern": "^https://(osv\\.dev/vulnerability/MAL-\\d{4}-\\d{1,8}|www\\.cisa\\.gov/known-exploited-vulnerabilities-catalog\\?search_api_fulltext=CVE-\\d{4}-\\d{4,8}|github\\.com/SoundMindsAI/kings-taster-data/blob/main/config/canaries\\.json)$"},
+        "license": {"enum": ["CC0-1.0", "Apache-2.0", "Apache-2.0 AND CC-BY-4.0", "MIT"]},
+        "attribution": {"type": "string", "pattern": "^[A-Za-z0-9 .,:;()'/+&-]{2,200}$"},
+        "published": {"$ref": "#/$defs/time"},
+        "modified": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+        "first_seen": {"$ref": "#/$defs/time"},
+        "status": {"enum": ["active", "retired"]},
+        "expires": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+        "review_state": {"enum": ["auto", "pending_review", "approved"]},
+        "canary": {"type": "boolean"}
+      }
+    }
+  }
+}
