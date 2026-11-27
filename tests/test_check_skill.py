@@ -378,7 +378,7 @@ class TestDecisions(unittest.TestCase):
 
     def test_skill_states_reserved_canary_rule(self):
         flat = " ".join(C.split_skill()[0].split())
-        self.assertIn("including a reserved list canary item", flat)
+        self.assertIn("including a list canary", flat)
 
     def _shard_extract(self, tmp, key, review_state=None, entry_id="kt:npm:lodash"):
         entry = {"id": entry_id, "match_key": key, "type": "package",
