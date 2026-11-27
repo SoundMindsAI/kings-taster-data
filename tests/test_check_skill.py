@@ -309,6 +309,16 @@ class TestDecisions(unittest.TestCase):
         self.assertIn("check_failed", rec["reasons"])
         self.assertTrue(any(s["source"] == "kings_taster_list" and s["required"] for s in rec["checked_against"]))
 
+    def test_required_source_cannot_be_marked_optional(self):
+        rec, _ = self._decide(self._package(), [
+            _src("osv", {}, required=False, status="not_configured", http_status=None),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
+        ])
+        self.assertEqual(rec["result"], "unknown")
+        self.assertIn("check_failed", rec["reasons"])
+        osv = next(s for s in rec["checked_against"] if s["source"] == "osv")
+        self.assertTrue(osv["required"])
+
     def test_no_link_source_wording(self):
         rec, _ = self._decide({
             "item_type": "link",
@@ -397,6 +407,16 @@ class TestHosts(unittest.TestCase):
         self.assertFalse(C.host_allowed(
             "https://github.com/SoundMindsAI/kings-taster-data/releases/download/../../evil/x"))
         self.assertFalse(C.host_allowed("https://evil.example/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"))
+
+    def test_host_plus_full_url_mismatch_is_refused(self):
+        # github.com + https://evil.example/<allowed-path> must not keep the
+        # allowlisted host and the path from the other URL.
+        evil = "https://evil.example" + self.LIST_OK
+        self.assertFalse(C.host_allowed("github.com", evil))
+        host, path = C._split_host_path("github.com", evil)
+        self.assertNotEqual((host or "").lower(), "github.com")
+        # Matching host + same-host URL still works.
+        self.assertTrue(C.host_allowed("github.com", "https://github.com" + self.LIST_OK))
 
 
 @unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")

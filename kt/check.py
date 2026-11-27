@@ -152,7 +152,11 @@ def _has_dotdot(value):
 
 
 def _split_host_path(host, url_path):
-    """Accept a bare host + path, or a full URL in either argument."""
+    """Accept a bare host + path, or a full URL in either argument.
+
+    When url_path is a full URL, the hostname always comes from that URL.
+    A bare host that does not match it is treated as a mismatch (empty host).
+    """
     path = url_path or ""
     raw_host = host or ""
     source = raw_host if ("://" in raw_host or raw_host.startswith("//")) else (
@@ -171,7 +175,17 @@ def _split_host_path(host, url_path):
         parsed_path = parsed_path.split("?", 1)[0].split("#", 1)[0]
         if "://" in raw_host or raw_host.startswith("//"):
             return hostname, parsed_path
-        return (host or hostname), parsed_path
+        # url_path is a full URL: always use its hostname. A bare host
+        # argument that disagrees is a mismatch and is refused.
+        if raw_host:
+            given = raw_host.split("@", 1)[-1]
+            if given.startswith("["):
+                given = given[1:].split("]", 1)[0]
+            else:
+                given = given.split(":", 1)[0]
+            if given.lower() != hostname.lower():
+                return "", parsed_path
+        return hostname, parsed_path
     return raw_host, path.split("?", 1)[0].split("#", 1)[0]
 
 
@@ -366,7 +380,9 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
 
     for src in sources:
         name = src["source"]
-        required = bool(src.get("required", name in REQUIRED.get(item_type, ())))
+        # Sources in REQUIRED for this item_type stay required; required=False
+        # cannot opt them out. Only extra sources may be marked optional.
+        required = name in REQUIRED.get(item_type, ()) or bool(src.get("required"))
         status = _status_of(src)
         if status == "not_configured":
             entry = {
