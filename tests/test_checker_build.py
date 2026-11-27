@@ -273,6 +273,13 @@ class TestArgvAndValidation(unittest.TestCase):
         argv = B.check_argv("package", name="left-pad", version="1.3.0", ecosystem="npm")
         self.assertEqual(argv[:5], ["python3", "-I", "-s", B.CHECKER, "check"])
         self.assertIn("--name=left-pad", argv)
+        self.assertNotIn("~", B.CHECKER)
+        self.assertTrue(os.path.isabs(argv[3]), argv[3])
+        self.assertNotIn("~", argv[3])
+
+    def test_snippets_have_no_tilde_paths(self):
+        _, snippets = B.split_skill()
+        self.assertNotIn("~", snippets)
 
     def test_repo_rules(self):
         self.assertEqual(B.validate_repo("Owner/re.po_1"), "Owner/re.po_1")
@@ -369,7 +376,7 @@ class TestRegexParityAndKeys(unittest.TestCase):
         for needle in ("authority contains `%`", "never convert an IDN host to Punycode", "0x80",
                        "`[` or `]`", "not a valid IPv4 address", "leading dot or an empty label",
                        "last label is all digits",
-                       "two or more trailing dots", "differs from node's behavior and is harmless"):
+                       "two or more trailing dots", "differs from Node.js behavior and is harmless"):
             self.assertIn(needle, text, needle)
 
 

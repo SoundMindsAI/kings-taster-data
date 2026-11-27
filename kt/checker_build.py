@@ -96,7 +96,7 @@ PKG_NAME = re.compile(r"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$")
 PKG_VER = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
 REPO_PART = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 ECOSYSTEMS = ("npm", "PyPI")
-CHECKER = "~/.kings-taster/checker.py"
+CHECKER = os.path.expanduser("~/.kings-taster/checker.py")
 _cache = {}
 
 
