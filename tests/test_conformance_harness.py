@@ -46,7 +46,7 @@ CLEAN_LIST = {"class": "clean", "hits": [], "list_hits": 0}
 def _item(spec):
     ind = spec["indicator_defanged"]
     item = dict(spec)
-    m = re.match(r"^(npm|pypi):([^@]+)@(.+)$", ind)
+    m = re.match(r"^(npm|pypi):(@?[^@]+)@(.+)$", ind)
     if m:
         item.update(ecosystem="npm" if m.group(1) == "npm" else "PyPI", name=m.group(2), version=m.group(3))
     return item

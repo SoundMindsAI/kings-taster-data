@@ -50,5 +50,5 @@ To verify a release, see "Verify a release" in the [README](README.md).
 
 | Part | Supported version |
 |---|---|
-| `SPEC.md` | 1.7 |
+| `SPEC.md` | 1.8 |
 | List format (`schema_version`) | 1 |

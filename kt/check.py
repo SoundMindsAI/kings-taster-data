@@ -12,6 +12,7 @@ import uuid
 
 from .common import normalize_package, parse_time, sha256_file
 from .finding import RESULT_RANK, validate_record, GOOGLE_ATTRIBUTION, GOOGLE_NOTICE
+from . import lookalike as LK
 from . import urlcheck as U
 from . import verify as KV
 
@@ -333,7 +334,10 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
     item_type = item["item_type"]
     indicator = item["indicator_defanged"]
     # Always consult config/popular/; there is no way to bypass a listed name.
-    popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
+    try:
+        popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
+    except OSError:
+        popular = False  # the lookalike check below reports the unreadable list as check_failed
     if health and health.get("status") == "failing":
         reason = health.get("reason") or "failed"
         explanation = ("Unknown. I couldn't finish the check: health check failing: %s. "
@@ -486,6 +490,16 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
                 deciding = _best(deciding, RESULT_RANK["block"], "safe_browsing", date,
                     "Block. %s is listed as malicious by Google Safe Browsing (%s, %s). Don't proceed. %s %s"
                     % (indicator, url, date, GOOGLE_ATTRIBUTION, GOOGLE_NOTICE))
+
+    # Lookalike-name check (SPEC.md §3.3): Caution only; an unreadable popular list is check_failed.
+    look = LK.check(item)
+    if look["class"] == "check_failed":
+        reasons.append("check_failed")
+    elif look["class"] == "lookalike":
+        reasons.append("lookalike")
+        deciding = _best(deciding, RESULT_RANK["caution"], "lookalike", _date10(now),
+            "Caution. %s looks like the popular name %s, from the lookalike-name check (%s)."
+            % (look["label"], look["match"], _date10(now)))
 
     # required sources missing from the list entirely
     seen = {s["source"] for s in checked}

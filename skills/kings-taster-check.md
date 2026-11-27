@@ -1,8 +1,6 @@
 # kings-taster-check
 
-Load to check a repo, package, or link.
-
-Never say "safe". Never print or summarize a key. Never read a raw response or README. Never contact, clone, install, or run the item. Write only under `~/.kings-taster/` and temp.
+Never say "safe", print or summarize a key, read a raw response or README, or contact, clone, install, or run the item. Write only under `~/.kings-taster/` and temp.
 
 If `~/.kings-taster/health.json` is failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
 
@@ -18,11 +16,11 @@ Wording:
 - Unknown. I can't check links until a link-reputation source is set up. Don't proceed. Say 'set up link checks' to add one.
 - No known reports. Checked against <source (date)>, … on <date>.
 
-A live OSV `MAL-` or alias is Block; other hits are Caution, with "upgrade to ≥ X" if known. On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live MAL- is held at Caution: "reported malicious by OSV, pending review". A verified list hit with review_state pending_review is Caution, never Block: "reported malicious by the King's Taster list, pending review". Other list hits Block, including a list canary. A Safe Browsing line adds Google's attribution and notice.
+A live OSV `MAL-` or alias is Block; other hits are Caution ("upgrade to ≥ X" if known). On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live MAL- is Caution: "reported malicious by OSV, pending review". A verified list hit with review_state pending_review is Caution, never Block: "reported malicious by the King's Taster list, pending review". Other list hits Block, including a list canary. A Safe Browsing line adds Google's attribution and notice. A lookalike name is Caution (`lookalike`), never Block, using the Commands lookalike rule (no network).
 
 Read keys only from `~/.kings-taster/keys.env` (`chmod 600`).
 
-Run the Commands exactly. Save raw responses to unread temp files. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/`. Reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding. Open it when asked why.
+Run the Commands exactly. Save raw responses to unread temp files. Extractors print at most 10 allowlisted lines. Write the finding under `~/.kings-taster/findings/` in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding, opened if asked why.
 
 Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block, Unknown, or links. Never cache a link. Cache the RDAP bootstrap for 7 days.
 
@@ -172,7 +170,7 @@ print("sb_hits %d" % len(threats))
 for t in threats[:7]: print("threat %s" % t)
 print("class %s" % ("hit" if threats else "clean"))
 ' "$RAW"
-
+- Lookalike (no network): run `python3 -E -s -m kt.lookalike`. A match is Caution (`lookalike`), never Block. Compare the canonical package name (and a scoped npm name's unscoped part), each lowercase repo owner and repo name, and each host label except the TLD (skip IPs and non-ASCII) against every `config/popular/` name. Do not flag an exact popular name. Flag when both have 5+ characters and Damerau-Levenshtein distance ≤ 1, or they match after this fold, in order: `0`→`o`, `1`→`l`, then `rn`→`m` and `vv`→`w` until neither remains (popular name 5+ characters). Cite the alphabetically first match. An unreadable list is Unknown (`check_failed`).
 ### google-notice
 Advisory provided by Google
 Google works to provide the most accurate and up-to-date information about unsafe web resources. However, Google cannot guarantee that its information is comprehensive and error-free: some risky sites may not be identified, and some safe sites may be identified in error.
