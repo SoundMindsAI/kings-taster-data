@@ -401,10 +401,10 @@ signed. It checks:
 - **Build:** today's `latest.json`, `manifest.json` and every shard were built, with every shard's SHA-256
   matching the manifest.
 - **Signing:** at sign-and-release, the health check runs on the unsigned files before any signing, and the
-  canary entries must be present. If the check fails, a hold is not accepted, or anything else unexpected
-  happens, nothing is signed and nothing is published. If health passes, or a person has accepted a hold,
-  the files are signed and then verified against an allowed signing key. The unsigned CI build checks
-  canaries and leaves signatures to sign-and-release.
+  canary entries must be present. If the check passes, or a person has accepted a hold, the files are signed
+  and then verified against an allowed signing key. If the check fails, if a hold is waiting and no one has
+  accepted it, or if anything else unexpected happens, nothing is signed and nothing is published. The unsigned
+  CI build checks canaries and leaves signatures to sign-and-release.
 - **No source went silent.** A source fails if its fetch failed, if it returned zero entries when it shouldn't,
   or if it added nothing for longer than its usual gap. The starting gaps are 3 days for OSV `MAL-` records and
   14 days for CISA KEV, recorded in `config/limits.json` under `pipeline_health`. They will be tuned from 30
