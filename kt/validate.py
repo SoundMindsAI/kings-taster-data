@@ -39,7 +39,30 @@ def _semver(s):
     return tuple(int(x) for x in s.split("."))
 
 
-def validate_iocs(doc, fast_entries=False):
+def list_canary_keys(root=None):
+    """Sorted match_key values (with multiplicity) of the fixed list canaries in
+    config/canaries.json, or None when the file is missing, unreadable, malformed
+    or lists no canaries. Callers must treat None as a failure, never as "nothing
+    expected"."""
+    path = os.path.join(root or ROOT, "config", "canaries.json")
+    try:
+        doc = read_json(path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict) or not isinstance(doc.get("list"), list):
+        return None
+    keys = []
+    for e in doc["list"]:
+        if not isinstance(e, dict) or "type" not in e or "value" not in e:
+            return None
+        try:
+            keys.append(match_key(e["type"], e["value"], e.get("ecosystem")))
+        except (KeyError, ValueError, TypeError):
+            return None
+    return sorted(keys) or None
+
+
+def validate_iocs(doc, fast_entries=False, root=None):
     schema = _schema("iocs")
     errors = []
     if fast_entries:
@@ -70,6 +93,7 @@ def validate_iocs(doc, fast_entries=False):
     if doc["paused"] != (doc["paused_reason"] is not None):
         errors.append("paused_reason: set if and only if paused")
     canaries = set()
+    canary_keys = []
     for e in doc["entries"]:
         t = e["type"]
         if t == "package":
@@ -96,8 +120,14 @@ def validate_iocs(doc, fast_entries=False):
             errors.append("entry %s: vulnerable entries are never held or blocked" % e["id"][:60])
         if e["canary"]:
             canaries.add(t + (":" + ECO_PREFIX[e["ecosystem"]] if t == "package" else ""))
+            canary_keys.append(e["match_key"])
             if e["kind"] != "malicious":
                 errors.append("entry %s: canaries are malicious entries" % e["id"][:60])
+            if not e["id"].startswith("canary:"):
+                # The canary flag must never let real data skip matching (SPEC.md §4).
+                errors.append("entry %s: canary flag on a non-canary id" % e["id"][:60])
+        elif e["id"].startswith("canary:"):
+            errors.append("entry %s: canary id without the canary flag" % e["id"][:60])
         try:
             if parse_time(e["first_seen"]) > parse_time(doc["generated_at"]):
                 errors.append("entry %s: first_seen after generated_at" % e["id"][:60])
@@ -105,6 +135,12 @@ def validate_iocs(doc, fast_entries=False):
             errors.append("entry %s: bad time" % e["id"][:60])
     if canaries != CANARY_TYPES:
         errors.append("entries: canary set incomplete (%s missing)" % sorted(CANARY_TYPES - canaries))
+    expected_keys = list_canary_keys(root)
+    if expected_keys is None:
+        errors.append("canaries: config/canaries.json is missing, unreadable or lists no canaries")
+    elif sorted(canary_keys) != expected_keys:
+        # Exact multiset match: no missing, extra or duplicated canary match_key.
+        errors.append("entries: canary match_keys differ from config/canaries.json")
     by_src = {}
     for e in doc["entries"]:
         k = "kings-taster-canary" if e["canary"] else ("cisa-kev" if e["id"].startswith("kev:") else
@@ -284,7 +320,7 @@ def check_monotonic(prev_iocs, new_iocs):
     return errors
 
 
-def validate_release_dir(d, previous_dir=None, fast_entries=True, now=None):
+def validate_release_dir(d, previous_dir=None, fast_entries=True, now=None, root=None):
     errors = []
     docs, raws = {}, {}
     for name in RELEASE_FILES + ("latest.json",):
@@ -306,7 +342,7 @@ def validate_release_dir(d, previous_dir=None, fast_entries=True, now=None):
                      ("manifest.json", "manifest"), ("latest.json", "latest")):
         if docs[name].get("file_type") != ft:
             errors.append("%s: file_type must be %s" % (name, ft))
-    errors += ["iocs.json: " + e for e in validate_iocs(docs["iocs.json"], fast_entries)]
+    errors += ["iocs.json: " + e for e in validate_iocs(docs["iocs.json"], fast_entries, root=root)]
     errors += ["stats.json: " + e for e in validate_stats(docs["stats.json"])]
     errors += ["conformance.json: " + e for e in validate_conformance(docs["conformance.json"])]
     m_errs = validate_manifest(docs["manifest.json"])

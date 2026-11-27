@@ -309,5 +309,17 @@ class TestQ2NoKnownReportsWording(unittest.TestCase):
         self.assertTrue(errs(r))
 
 
+class TestN4PortZeroRefused(unittest.TestCase):
+    """N4: an explicit port is refused even when it is 0 (falsy)."""
+
+    def test_port_zero_is_not_an_official_host(self):
+        url = "https://osv.dev:0/vulnerability/MAL-2026-1"
+        self.assertIsNotNone(finding.official_url_problem(url, finding.EXPLANATION_URL_HOSTS))
+        self.assertIsNotNone(finding.official_url_problem("https://osv.dev:443/vulnerability/MAL-2026-1",
+                                                          finding.EXPLANATION_URL_HOSTS))
+        self.assertIsNone(finding.official_url_problem("https://osv.dev/vulnerability/MAL-2026-1",
+                                                       finding.EXPLANATION_URL_HOSTS))
+
+
 if __name__ == "__main__":
     unittest.main()

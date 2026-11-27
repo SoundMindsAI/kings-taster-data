@@ -210,6 +210,99 @@ class TestHealthPassAndHolds(HealthCase):
         self.assertEqual(report["status"], "fail")
         self.assertTrue(any("match_key" in x for x in report["failed"]), report["failed"])
 
+    def _canary_check(self, report):
+        return next(c for c in report["checks"] if c["name"] == "canaries")
+
+    def test_canary_flag_on_a_real_entry_is_fail(self):
+        # N1: canary:true on a real OSV/KEV entry (own id, own match_key) must not pass
+        # health or validate; otherwise the checker would skip it as a canary.
+        from kt import validate as V
+        out = self.build()
+        iocs_path = os.path.join(out, "iocs.json")
+        iocs = load(iocs_path)
+        victim = next(e for e in iocs["entries"] if not e["canary"] and e["type"] == "package")
+        self.assertFalse(victim["id"].startswith("canary:"))
+        victim["canary"] = True
+        write_canonical(iocs_path, iocs)
+        report = self.check(out)
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(self._canary_check(report)["status"], "fail", report["checks"])
+        self.assertTrue(any(x.startswith("canaries:") for x in report["failed"]), report["failed"])
+        errs = V.validate_iocs(iocs, root=self.root)
+        self.assertTrue(any("canary" in e for e in errs), errs)
+        self.assertTrue(any("canary" in e for e in V.validate_release_dir(out, now=T0, root=self.root)))
+
+    def test_canary_flag_on_real_entry_with_canary_key_is_fail(self):
+        # Same as above but the flagged real entry copies a canary's match_key, so a
+        # subset check on keys alone would pass; counts must match exactly.
+        out = self.build()
+        iocs_path = os.path.join(out, "iocs.json")
+        iocs = load(iocs_path)
+        canary = next(e for e in iocs["entries"] if e["canary"] and e["type"] == "package")
+        victim = next(e for e in iocs["entries"] if not e["canary"] and e["type"] == "package"
+                      and e["ecosystem"] == canary["ecosystem"])
+        victim["canary"] = True
+        victim["match_key"] = canary["match_key"]
+        write_canonical(iocs_path, iocs)
+        report = self.check(out)
+        self.assertEqual(self._canary_check(report)["status"], "fail", report["checks"])
+
+    def test_duplicate_configured_canary_key_is_fail(self):
+        # N1 counts: an extra flagged entry whose id starts with canary: and whose
+        # match_key copies a configured canary must fail (a set-subset check would pass).
+        out = self.build()
+        iocs_path = os.path.join(out, "iocs.json")
+        iocs = load(iocs_path)
+        canary = next(e for e in iocs["entries"] if e["canary"])
+        extra = dict(canary)
+        extra["id"] = canary["id"] + "-dup"
+        self.assertTrue(extra["id"].startswith("canary:"))
+        iocs["entries"].append(extra)
+        write_canonical(iocs_path, iocs)
+        report = self.check(out)
+        self.assertEqual(self._canary_check(report)["status"], "fail", report["checks"])
+        self.assertTrue(any("match_key" in x for x in report["failed"]), report["failed"])
+
+    def test_missing_canary_config_is_fail(self):
+        # N2: no config/canaries.json must fail the check, not mean "no expected keys".
+        out = self.build()
+        os.remove(os.path.join(self.root, "config", "canaries.json"))
+        report = self.check(out)
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(self._canary_check(report)["status"], "fail", report["checks"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(H.main([out, "--now", T0_ISO, "--out", os.path.join(self.tmp, "h.json"),
+                                     "--root", self.root]), H.EXIT_FAIL)
+
+    def test_corrupt_canary_config_is_fail(self):
+        out = self.build()
+        path = os.path.join(self.root, "config", "canaries.json")
+        for raw in ("{not-json", '{"list": []}', '{"list": "x"}', "[]"):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(raw)
+            report = self.check(out)
+            self.assertEqual(report["status"], "fail", raw)
+            self.assertEqual(self._canary_check(report)["status"], "fail", (raw, report["checks"]))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(H.main([out, "--now", T0_ISO, "--out", os.path.join(self.tmp, "h.json"),
+                                     "--root", self.root]), H.EXIT_FAIL)
+
+    def test_crash_report_keeps_parsed_flags(self):
+        # N6: a crash after parse_args records the flags that were actually given.
+        import json
+        out = self.build()
+        with open(os.path.join(out, "latest.json"), "w") as f:
+            f.write("{not-json")
+        dest = os.path.join(self.tmp, "pipeline-health.json")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = H.main([out, "--now", T0_ISO, "--out", dest, "--root", self.root, "--signed", "--no-shards"])
+        self.assertEqual(rc, H.EXIT_FAIL)
+        with open(dest, encoding="utf-8") as f:
+            doc = json.loads(f.read())
+        self.assertEqual(doc["status"], "fail")
+        self.assertIs(doc["signed"], True)
+        self.assertIs(doc["require_shards"], False)
+
     def test_silent_gap_uses_full_elapsed_seconds(self):
         out = self.build()
         iocs_path = os.path.join(out, "iocs.json")

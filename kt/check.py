@@ -474,7 +474,10 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
                 reasons.append("unverified_list")
                 entry["status"] = "failed"
                 continue
-            hits = [h for h in (extracted.get("hits") or []) if not h.get("canary")]
+            # Only the build-assigned "canary:" ids are canaries. A hit that merely
+            # carries canary=yes is real list data and must still block.
+            hits = [h for h in (extracted.get("hits") or [])
+                    if not str(h.get("id") or "").startswith("canary:")]
             if extracted.get("class") != "clean" and hits:
                 hit = hits[0]
                 url = "https://github.com/SoundMindsAI/kings-taster-data/"

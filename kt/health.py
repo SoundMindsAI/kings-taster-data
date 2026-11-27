@@ -11,9 +11,9 @@ import os
 import sys
 import tempfile
 
-from .common import ECO_PREFIX, match_key, parse_time, read_json, sha256_bytes, utc_now
+from .common import ECO_PREFIX, parse_time, read_json, sha256_bytes, utc_now
 from .shards import looks_like_shard_filename
-from .validate import CANARY_TYPES, FUTURE_SKEW_SECONDS, validate_release_dir
+from .validate import CANARY_TYPES, FUTURE_SKEW_SECONDS, list_canary_keys, validate_release_dir
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SILENT_SOURCES = ("cisa-kev", "osv-npm", "osv-pypi")
@@ -156,25 +156,34 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
                 _add(report, "dates", "ok", "generated_at %s, first_seen on or before it" % latest["generated_at"])
 
     # --- Canaries ---
+    # The canary flag must never let real data skip matching: every flagged entry
+    # must carry a build-assigned "canary:" id, and the flagged match_keys must be
+    # exactly the configured list canaries (same keys, same counts).
     have = set()
+    flagged_keys = []
+    bad_ids = []
     for e in iocs.get("entries") or []:
         if not e.get("canary"):
             continue
+        eid = e.get("id")
+        if not (isinstance(eid, str) and eid.startswith("canary:")):
+            bad_ids.append(str(eid)[:60] if eid is not None else "?")
         typ = e.get("type") or ""
         if typ == "package":
             have.add(typ + ":" + ECO_PREFIX.get(e.get("ecosystem"), ""))
         else:
             have.add(typ)
+        mk = e.get("match_key")
+        flagged_keys.append(mk if isinstance(mk, str) else "?")
     missing_c = sorted(CANARY_TYPES - have)
     expected_keys = _expected_canary_keys(root)
-    listed_keys = set()
-    for e in iocs.get("entries") or []:
-        if e.get("canary") and isinstance(e.get("match_key"), str):
-            listed_keys.add(e["match_key"])
-    missing_keys = sorted(expected_keys - listed_keys)
     if missing_c:
         _add(report, "canaries", "fail", "missing canary types: %s" % ", ".join(missing_c))
-    elif missing_keys:
+    elif bad_ids:
+        _add(report, "canaries", "fail", "canary flag on non-canary ids: %s" % ", ".join(bad_ids[:8]))
+    elif expected_keys is None:
+        _add(report, "canaries", "fail", "config/canaries.json is missing, unreadable or lists no canaries")
+    elif sorted(flagged_keys) != expected_keys:
         _add(report, "canaries", "fail", "canary match_key mismatch")
     else:
         _add(report, "canaries", "ok", "list canaries present for %s" % ", ".join(sorted(have)))
@@ -253,7 +262,7 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
     # it because the pointer files have no shards.
     if require_shards:
         errs = validate_release_dir(release_dir, previous_dir=previous_dir,
-                                    fast_entries=True, now=now)
+                                    fast_entries=True, now=now, root=root)
         if errs:
             _add(report, "validate", "fail", errs[0])
         else:
@@ -263,21 +272,9 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
 
 
 def _expected_canary_keys(root):
-    """match_key values of the fixed list canaries in config/canaries.json."""
-    path = os.path.join(root, "config", "canaries.json")
-    try:
-        doc = read_json(path)
-    except (OSError, ValueError):
-        return set()
-    keys = set()
-    for e in doc.get("list") or []:
-        if not isinstance(e, dict) or "type" not in e or "value" not in e:
-            continue
-        try:
-            keys.add(match_key(e["type"], e["value"], e.get("ecosystem")))
-        except (KeyError, ValueError, TypeError):
-            continue
-    return keys
+    """Sorted match_key values of the fixed list canaries in config/canaries.json,
+    or None when the file is missing, unreadable or empty (the check must fail)."""
+    return list_canary_keys(root)
 
 
 def _size_jumps(release_dir, manifest, previous_dir, prev_manifest, ratio):
@@ -346,12 +343,14 @@ def main(argv=None):
     ap.add_argument("--allowed-signers")
     ap.add_argument("--root", default=ROOT)
     out = None
+    signed, require_shards = False, True
     try:
         try:
             a = ap.parse_args(argv)
         except SystemExit as e:
             # argparse uses status 2 for usage errors; that must not mean "hold".
             return EXIT_OK if e.code in (0, None) else EXIT_FAIL
+        signed, require_shards = bool(a.signed), not a.no_shards
         out = a.out or os.path.join(a.release_dir, "pipeline-health.json")
         report = check_release(
             a.release_dir, a.previous, now=a.now, signed=a.signed,
@@ -371,7 +370,7 @@ def main(argv=None):
         if out:
             try:
                 write_report(out, {
-                    "status": "fail", "signed": False, "require_shards": True,
+                    "status": "fail", "signed": signed, "require_shards": require_shards,
                     "generated_at": None, "tag": None, "checks": [],
                     "failed": ["health check crashed"], "holds": [],
                 })
