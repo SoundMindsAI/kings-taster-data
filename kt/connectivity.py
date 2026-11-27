@@ -6,8 +6,8 @@ conformance/cases.json ("connectivity") is checked against, so the two can't dri
 import re
 
 TEMPLATE = "KT %s is live and checking"
-PATTERN = re.compile(r"^KT \d{1,3}\.\d{1,3}\.\d{1,3} is live and checking\Z")
-SEMVER = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\Z")
+PATTERN = re.compile(r"^KT \d{1,3}\.\d{1,3}\.\d{1,3} is live and checking\Z", re.ASCII)
+SEMVER = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\Z", re.ASCII)
 OFFER = "Want to post a one-time reply to the King's Taster X thread to confirm your setup works?"
 APPROVAL_NOTICE = "This posts publicly from your X account, so anyone can see that this account uses King's Taster."
 READ_ONLY_OK = "X connection works (read-only check)"
