@@ -18,11 +18,11 @@ Wording:
 - Unknown. I can't check links until a link-reputation source is set up. Don't proceed. Say 'set up link checks' to add one.
 - No known reports. Checked against <source (date)>, … on <date>.
 
-A live OSV `MAL-` id or alias is Block; other OSV hits are Caution, with "upgrade to ≥ X" if known. A live malicious hit on a top-10k name is held at Caution: "reported malicious by OSV, pending review". A Safe Browsing line adds the Commands section's Google attribution and notice.
+A live OSV `MAL-` or alias is Block; other hits are Caution, with "upgrade to ≥ X" if known. A live MAL- on a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503) is held at Caution: "reported malicious by OSV, pending review". A Safe Browsing line adds the Google attribution and notice.
 
 Read keys only from `~/.kings-taster/keys.env` (`chmod 600`); never print them.
 
-Run the Commands exactly. Save each raw response to a temp file the AI does not read. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/` and reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding. Open it only when asked why.
+Run the Commands exactly. Save each raw response to a temp file the AI does not read. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/` and reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding. Open it when asked why.
 
 Reuse package or repo Caution or No known reports for 24 hours only when name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block or Unknown. Never cache a link. Cache the RDAP bootstrap for 7 days.
 
@@ -37,7 +37,7 @@ Time: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list file): `curl --proto
 - GitHub: `GET https://api.github.com/repos/$OWNER/$REPO`. Send `Authorization: Bearer $GITHUB_TOKEN` only if set; never print it.
 - IANA: `GET https://data.iana.org/rdap/dns.json`, then `GET` the matching RDAP server (HTTPS, max-redirs 0).
 - Safe Browsing v5: `POST https://safebrowsing.googleapis.com/v5/urls:search?key=$SAFE_BROWSING_KEY` with at most 50 URLs, including Google's test URL. Never print the key.
-- List file (only allowed redirect): `curl --proto =https --max-redirs 1 -sS -L -o "$RAW" -w '%{url_effective}\n'` for `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and `latest.json.sig`. The effective host must be `github.com` or `release-assets.githubusercontent.com`. Verify with `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -` (or `kings-taster-next`). Fetch and verify `manifest.json` from the tagged release the same way, then the shard for the item's `match_key`.
+- List file (only allowed redirect): `curl --proto =https --max-redirs 1 -sS -L -o "$RAW" -w '%{url_effective}\n'` for `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and `latest.json.sig`. The effective host must be `github.com` or `release-assets.githubusercontent.com`. Fetch `manifest.json` (and `.sig`) and the shard for the item's `match_key` the same way. Verify the directory with `scripts/verify.sh DIR --allowed-signers allowed_signers --state ~/.kings-taster/verify-state.json` (or `python3 -E -s -m kt.verify`). That runs `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE` (or `-I kings-taster-next`), checks each file's SHA-256 and `file_type` against `latest.json` and each shard against `manifest.json`, enforces the 64 KiB signature cap, honors `keys.json` and `root_pins` (a missing `keys.json` is refused once the pins are published), and uses `--state` to refuse rollback. A failed verify is `unverified_list`.
 
 ### extract-osv
 python3 -I -c '

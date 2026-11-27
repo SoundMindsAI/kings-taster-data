@@ -6,13 +6,15 @@ the skill and the rules agree. It never contacts the network.
 """
 import hashlib
 import os
+import posixpath
 import re
 import subprocess
 import sys
 import uuid
 
-from .common import normalize_package
+from .common import normalize_package, parse_time
 from .finding import RESULT_RANK, validate_record, GOOGLE_ATTRIBUTION, GOOGLE_NOTICE
+from . import verify as KV
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SKILL_PATH = os.path.join(ROOT, "skills", "kings-taster-check.md")
@@ -126,12 +128,91 @@ def parse_extracted(stdout):
     return data
 
 
+def _unquote_path(value, times=4):
+    """Decode %XX sequences (any case) a few times, without a network library."""
+    out = value or ""
+    for _ in range(times):
+        nxt = re.sub(r"%([0-9A-Fa-f]{2})",
+                     lambda m: bytes.fromhex(m.group(1)).decode("latin-1"), out)
+        if nxt == out:
+            break
+        out = nxt
+    return out
+
+
+def _has_dotdot(value):
+    """True if value has a '..' path segment, including percent-encoded forms."""
+    raw = value or ""
+    lower = raw.lower()
+    if ".." in raw:
+        return True
+    if "%2e%2e" in lower or "%2e." in lower or ".%2e" in lower or "%252e" in lower:
+        return True
+    return False
+
+
+def _split_host_path(host, url_path):
+    """Accept a bare host + path, or a full URL in either argument."""
+    path = url_path or ""
+    raw_host = host or ""
+    source = raw_host if ("://" in raw_host or raw_host.startswith("//")) else (
+        path if ("://" in path or path.startswith("//")) else None)
+    if source is not None:
+        rest = source.split("://", 1)[-1] if "://" in source else source[2:]
+        authority, _, remainder = rest.partition("/")
+        if "@" in authority:
+            authority = authority.rsplit("@", 1)[1]
+        # Strip a port, but keep IPv6 in brackets out of scope (we only allow names).
+        if authority.startswith("["):
+            hostname = authority[1:].split("]", 1)[0]
+        else:
+            hostname = authority.split(":", 1)[0]
+        parsed_path = "/" + remainder if remainder or rest.endswith("/") or "/" in rest else "/"
+        parsed_path = parsed_path.split("?", 1)[0].split("#", 1)[0]
+        if "://" in raw_host or raw_host.startswith("//"):
+            return hostname, parsed_path
+        return (host or hostname), parsed_path
+    return raw_host, path.split("?", 1)[0].split("#", 1)[0]
+
+
+def _list_download_path_ok(path):
+    """github.com is allowed only for /SoundMindsAI/kings-taster-data/releases/download/<tag>/<file>.
+
+    The prefix is matched on segment boundaries. Any '..' (raw or encoded, any case) is refused.
+    """
+    if not path or _has_dotdot(path):
+        return False
+    decoded = _unquote_path(path)
+    if _has_dotdot(decoded):
+        return False
+    if "\\" in decoded:
+        return False
+    if not decoded.startswith("/"):
+        decoded = "/" + decoded
+    normalized = posixpath.normpath(decoded)
+    if normalized != decoded.rstrip("/") and normalized + "/" != decoded:
+        # Collapse of '.' or '//' only is ok; a changed path after '..' was already refused.
+        if ".." in decoded.split("/") or ".." in normalized.split("/"):
+            return False
+    if not normalized.startswith(LIST_PATH_PREFIX):
+        return False
+    rest = normalized[len(LIST_PATH_PREFIX):]
+    parts = [p for p in rest.split("/") if p]
+    if len(parts) < 2:
+        return False
+    if any(p in (".", "..") for p in parts):
+        return False
+    return True
+
+
 def host_allowed(host, url_path="", list_redirect=False):
+    """True only for allowlisted hosts. github.com is list-download paths only (no /repos/)."""
+    host, url_path = _split_host_path(host, url_path)
     host = (host or "").lower()
     if list_redirect:
         return host in LIST_REDIRECT_HOSTS
     if host == "github.com":
-        return url_path.startswith(LIST_PATH_PREFIX) or url_path.startswith("/repos/")
+        return _list_download_path_ok(url_path)
     if host not in ALLOWED_HOSTS:
         return False
     if host == "release-assets.githubusercontent.com":
@@ -153,10 +234,66 @@ def _popular_names(root=None):
     return names
 
 
+def _canonical_ecosystem(ecosystem):
+    """Map ecosystem spelling to the canonical value; unknown names are None (not an error)."""
+    if not ecosystem:
+        return None
+    key = str(ecosystem).strip()
+    lowered = key.lower()
+    if lowered == "npm":
+        return "npm"
+    if lowered == "pypi":
+        return "PyPI"
+    return None
+
+
 def is_popular(ecosystem, name, root=None):
+    """True if the name is on the top-10k list. Ecosystem spelling is case-insensitive."""
     if not ecosystem or not name:
         return False
-    return (ecosystem, normalize_package(ecosystem, name)) in _popular_names(root)
+    eco = _canonical_ecosystem(ecosystem)
+    if eco is None:
+        return False
+    try:
+        return (eco, normalize_package(eco, name)) in _popular_names(root)
+    except ValueError:
+        return False
+
+
+def verify_list(release_dir, allowed_signers=None, state=None, now=None,
+                template_version=None, require_shards=False, max_age_hours=48,
+                update_state=False):
+    """Run the official verifier (scripts/verify.sh / kt.verify.verify_release) on a local dir.
+
+    That path covers keys.json, rollback state, a missing-keys refusal once pins are
+    published, latest.json hash and file_type checks, and shard SHA-256 vs the manifest.
+    Never contacts the network. Returns a dict with ok, reason, detail, and code.
+    """
+    allowed = allowed_signers or os.path.join(ROOT, "config", "allowed_signers")
+    now_val = parse_time(now) if isinstance(now, str) else now
+    try:
+        code, line = KV.verify_release(
+            release_dir, allowed, state=state, update_state=update_state,
+            template_version=template_version, now=now_val,
+            max_age_hours=max_age_hours, require_shards=require_shards,
+        )
+    except KV.VerifyError as e:
+        return {"ok": False, "reason": "unverified_list", "detail": str(e)[:300], "code": 1}
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
+        return {"ok": False, "reason": "unverified_list", "detail": str(e)[:300], "code": 1}
+    if code == 0:
+        return {"ok": True, "reason": None, "detail": line, "code": 0}
+    if code == 5:
+        return {"ok": False, "reason": "stale_list", "detail": line, "code": 5}
+    if code == 3:
+        return {"ok": False, "reason": "paused", "detail": line, "code": 3}
+    if code == 4:
+        return {"ok": False, "reason": "update_required", "detail": line, "code": 4}
+    return {"ok": False, "reason": "unverified_list", "detail": line, "code": code}
+
+
+# Official verifier used by scripts/verify.sh.
+verify_release = KV.verify_release
 
 
 def _date10(value, fallback=""):
@@ -193,11 +330,14 @@ def _status_of(src):
     return src.get("status") or "ok"
 
 
-def decide(item, sources, *, popular=False, health=None, now="2026-11-27T00:00:00Z",
+def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00Z",
            template_version="1.0.0", finding_id=None, finding_path="~/.kings-taster/findings/example.json"):
     """Apply the fixed checklist rules and return record, explanation, and at most 5 verdict lines."""
     item_type = item["item_type"]
     indicator = item["indicator_defanged"]
+    # Always consult config/popular/; the popular= flag cannot bypass a listed name,
+    # and cannot hold an unlisted name at Caution.
+    popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
     if health and health.get("status") == "failing":
         reason = health.get("reason") or "failed"
         explanation = ("Unknown. I couldn't finish the check: health check failing: %s. "
@@ -296,6 +436,26 @@ def decide(item, sources, *, popular=False, health=None, now="2026-11-27T00:00:0
                 deciding = _best(deciding, RESULT_RANK["caution"], "osv", date,
                     "Caution. %s, from OSV.dev (%s, %s)." % (why, url, date))
         elif name == "kings_taster_list":
+            verified = bool(src.get("verified"))
+            if not verified and src.get("release_dir"):
+                vr = verify_list(
+                    src["release_dir"],
+                    allowed_signers=src.get("allowed_signers"),
+                    state=src.get("state"),
+                    now=now,
+                    template_version=template_version,
+                    require_shards=bool(src.get("require_shards", True)),
+                    max_age_hours=src.get("max_age_hours", 48),
+                )
+                verified = bool(vr.get("ok"))
+                if not verified:
+                    reasons.append(vr.get("reason") or "unverified_list")
+                    entry["status"] = "failed"
+                    continue
+            if not verified:
+                reasons.append("unverified_list")
+                entry["status"] = "failed"
+                continue
             hits = [h for h in (extracted.get("hits") or []) if not h.get("canary")]
             if extracted.get("class") != "clean" and hits:
                 hit = hits[0]
@@ -357,6 +517,8 @@ def decide(item, sources, *, popular=False, health=None, now="2026-11-27T00:00:0
     elif result == "unknown":
         which = _unknown_which(reasons, checked)
         explanation = ("Unknown. I couldn't finish the check: %s. Don't proceed until it can be checked." % which)
+        if deciding and deciding[3].startswith("Caution."):
+            explanation = "%s %s" % (explanation, deciding[3])
     elif result == "caution":
         explanation = deciding[3] if deciding else (
             "Caution. A required source reported a concern, from OSV.dev (https://osv.dev/vulnerability/OSV, %s)." % _date10(now))
@@ -460,7 +622,9 @@ def _verdict_lines(rec, deciding, finding_path):
         others.append("%s=%s" % (s["source"], s["status"]))
     line3 = "Sources: %s" % (", ".join(others) if others else "none")
     lines = [line1, line2, line3]
-    if result in ("unknown", "caution") and rec["reasons"]:
+    if result == "unknown" and deciding and deciding[3].startswith("Caution."):
+        lines.append(deciding[3])
+    elif result in ("unknown", "caution") and rec["reasons"]:
         lines.append("Reason: %s" % ", ".join(rec["reasons"]))
     lines.append(finding_path)
     return lines[:5]

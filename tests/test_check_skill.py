@@ -20,12 +20,22 @@ SHA = "abababababababababababababababababababababababababababababababab"
 
 
 def _src(name, extracted, *, required=True, status="ok", http_status=200,
-         source_date="2026-11-26T10:00:00Z", canary_ok=True):
-    return {
+         source_date="2026-11-26T10:00:00Z", canary_ok=True, verified=None,
+         release_dir=None, allowed_signers=None, state=None):
+    rec = {
         "source": name, "required": required, "status": status,
         "http_status": http_status, "response_sha256": SHA,
         "source_date": source_date, "extracted": extracted, "canary_ok": canary_ok,
     }
+    if verified is not None:
+        rec["verified"] = verified
+    if release_dir is not None:
+        rec["release_dir"] = release_dir
+    if allowed_signers is not None:
+        rec["allowed_signers"] = allowed_signers
+    if state is not None:
+        rec["state"] = state
+    return rec
 
 
 def _extract(name, *files):
@@ -60,6 +70,13 @@ class TestSkillCaps(unittest.TestCase):
             "release-assets.githubusercontent.com",
             "github.com/SoundMindsAI/kings-taster-data/releases/download",
             "ssh-keygen -Y verify",
+            "-s FILE.sig",
+            "scripts/verify.sh",
+            "keys.json",
+            "root_pins",
+            "--state",
+            "SHA-256",
+            "config/popular/",
             "~/.kings-taster/keys.env",
             "Never say \"safe\"",
             "rate_limited",
@@ -184,7 +201,7 @@ class TestDecisions(unittest.TestCase):
         r, data = _extract("osv", "osv-mal.json")
         rec, lines = self._decide(self._package(), [
             _src("osv", data),
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
         ])
         self.assertEqual(rec["result"], "block")
         self.assertIn("malicious_match", rec["reasons"])
@@ -196,7 +213,7 @@ class TestDecisions(unittest.TestCase):
         r, data = _extract("osv", "osv-vuln.json")
         rec, lines = self._decide(self._package("praisonaiagents", "1.0.0"), [
             _src("osv", data),
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
         ])
         self.assertEqual(rec["result"], "caution")
         self.assertIn("vulnerable_version", rec["reasons"])
@@ -207,7 +224,7 @@ class TestDecisions(unittest.TestCase):
     def test_clean_is_no_known_reports(self):
         rec, lines = self._decide(self._package("left-pad", "1.0.0", "npm"), [
             _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
         ])
         self.assertEqual(rec["result"], "no_known_reports")
         self.assertEqual(rec["reasons"], [])
@@ -219,12 +236,49 @@ class TestDecisions(unittest.TestCase):
         self.assertTrue(C.is_popular("npm", "lodash"))
         rec, lines = self._decide(self._package("lodash", "4.0.0", "npm"), [
             _src("osv", data),
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
-        ], popular=True)
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
+        ])  # popular= omitted: decide() must read config/popular/ itself
         self.assertEqual(rec["result"], "caution")
         self.assertIn("pending_review", rec["reasons"])
         self.assertNotIn("malicious_match", rec["reasons"])
         self.assertIn("pending review", rec["explanation"])
+        # An explicit popular=False must not bypass the list for lodash.
+        rec2, _ = self._decide(self._package("lodash", "4.0.0", "npm"), [
+            _src("osv", data),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
+        ], popular=False)
+        self.assertEqual(rec2["result"], "caution")
+        self.assertIn("pending_review", rec2["reasons"])
+
+    def test_is_popular_ecosystem_spelling_is_case_insensitive(self):
+        self.assertTrue(C.is_popular("npm", "lodash"))
+        self.assertTrue(C.is_popular("NPM", "lodash"))
+        self.assertFalse(C.is_popular("pypi", "not-a-real-package-xxxxxx"))
+        self.assertFalse(C.is_popular("NPM", "not-a-real-package-xxxxxx"))
+        # Must not raise for pypi / NPM (L-PR7-3).
+        self.assertIsInstance(C.is_popular("pypi", "requests"), bool)
+        self.assertIsInstance(C.is_popular("PyPI", "requests"), bool)
+
+    def test_unverified_list_is_unknown_even_when_extracted_clean(self):
+        rec, _ = self._decide(self._package(), [
+            _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
+        ])
+        self.assertEqual(rec["result"], "unknown")
+        self.assertIn("unverified_list", rec["reasons"])
+
+    def test_osv_caution_is_shown_when_list_is_unverified(self):
+        r, data = _extract("osv", "osv-vuln.json")
+        rec, lines = self._decide(self._package("praisonaiagents", "1.0.0", "PyPI"), [
+            _src("osv", data),
+            _src("kings_taster_list", {"class": "injection_seen"}, status="failed", http_status=200),
+        ])
+        self.assertEqual(rec["result"], "unknown")
+        self.assertIn("vulnerable_version", rec["reasons"])
+        self.assertTrue(rec["explanation"].startswith("Unknown."))
+        self.assertIn("upgrade to", rec["explanation"])
+        self.assertTrue(any(l.startswith("Caution.") for l in lines), lines)
+        self.assertLessEqual(len(lines), 5)
 
     def test_block_wins_over_unknown(self):
         r, data = _extract("osv", "osv-mal.json")
@@ -239,7 +293,7 @@ class TestDecisions(unittest.TestCase):
     def test_rate_limited_is_unknown(self):
         rec, _ = self._decide(self._package(), [
             _src("osv", {}, status="rate_limited", http_status=429),
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
         ])
         self.assertEqual(rec["result"], "unknown")
         self.assertIn("rate_limited", rec["reasons"])
@@ -258,7 +312,7 @@ class TestDecisions(unittest.TestCase):
             "item_type": "link",
             "indicator_defanged": "hxxps://example[.]invalid/x",
         }, [
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
             _src("rdap", {"class": "ok", "registration": "1995-08-14", "ldhName": "example.invalid"}),
             _src("safe_browsing", {}, status="not_configured", http_status=None, required=True),
         ])
@@ -269,7 +323,7 @@ class TestDecisions(unittest.TestCase):
     def test_health_failing_short_circuits(self):
         rec, lines = self._decide(self._package(), [
             _src("osv", {"class": "clean", "hits": []}),
-            _src("kings_taster_list", {"class": "clean", "hits": []}),
+            _src("kings_taster_list", {"class": "clean", "hits": []}, verified=True),
         ], health={"status": "failing", "reason": "stale list"})
         self.assertEqual(rec["result"], "unknown")
         self.assertIn("health check failing: stale list", rec["explanation"])
@@ -280,7 +334,7 @@ class TestDecisions(unittest.TestCase):
         r, data = _extract("list", "list-shard.json", "pypi:bloomcredit-python")
         rec, _ = self._decide(self._package(), [
             _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
-            _src("kings_taster_list", data),
+            _src("kings_taster_list", data, verified=True),
         ])
         self.assertEqual(rec["result"], "block")
         self.assertIn("malicious_match", rec["reasons"])
@@ -288,19 +342,159 @@ class TestDecisions(unittest.TestCase):
     def test_canary_failure_is_unknown(self):
         rec, _ = self._decide(self._package(), [
             _src("osv", {"class": "clean", "hits": []}, canary_ok=False, status="failed"),
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
+            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
         ])
         self.assertEqual(rec["result"], "unknown")
         self.assertIn("check_failed", rec["reasons"])
 
 
 class TestHosts(unittest.TestCase):
+    LIST_OK = "/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"
+
     def test_allowlist(self):
         self.assertTrue(C.host_allowed("api.osv.dev"))
         self.assertTrue(C.host_allowed("api.github.com", "/repos/octocat/Hello-World"))
-        self.assertTrue(C.host_allowed("github.com", "/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"))
+        self.assertTrue(C.host_allowed("github.com", self.LIST_OK))
         self.assertTrue(C.host_allowed("release-assets.githubusercontent.com", list_redirect=True))
         self.assertFalse(C.host_allowed("release-assets.githubusercontent.com"))
         self.assertFalse(C.host_allowed("evil.example"))
         self.assertFalse(C.host_allowed("github.com", "/evil/repo/archive/main.zip"))
         self.assertFalse(C.host_allowed("example.com"))  # the item's own site
+
+    def test_github_com_repos_is_refused(self):
+        # Skill: github.com only for the list download path; API calls go to api.github.com.
+        self.assertFalse(C.host_allowed("github.com", "/repos/octocat/Hello-World"))
+        self.assertFalse(C.host_allowed("github.com", "/repos/SoundMindsAI/kings-taster-data"))
+
+    def test_dotdot_in_list_path_is_refused(self):
+        path = "/SoundMindsAI/kings-taster-data/releases/download/../../../../other/releases/download/x/y"
+        self.assertFalse(C.host_allowed("github.com", path))
+
+    def test_encoded_dotdot_any_case_is_refused(self):
+        prefix = "/SoundMindsAI/kings-taster-data/releases/download/"
+        for enc in ("%2e%2e", "%2E%2E", "%2e%2E", "%2E%2e", "%2e%2e", "%252e%252e"):
+            self.assertFalse(C.host_allowed("github.com", prefix + enc + "/other/x"), enc)
+            self.assertFalse(C.host_allowed("github.com", prefix + enc.upper() + "/other/x"), enc)
+
+    def test_list_prefix_is_matched_on_segment_boundaries(self):
+        # A longer first segment must not match just because it starts with the prefix.
+        self.assertFalse(C.host_allowed(
+            "github.com",
+            "/SoundMindsAI/kings-taster-data/releases/download-evil/kt-latest/latest.json"))
+        self.assertFalse(C.host_allowed(
+            "github.com",
+            "/SoundMindsAI/kings-taster-data/releases/download"))
+        self.assertFalse(C.host_allowed(
+            "github.com",
+            "/SoundMindsai/kings-taster-data/releases/download/kt-latest/latest.json"))
+
+    def test_full_url_is_parsed(self):
+        url = "https://github.com" + self.LIST_OK
+        self.assertTrue(C.host_allowed(url))
+        self.assertTrue(C.host_allowed("github.com", url))
+        self.assertFalse(C.host_allowed(
+            "https://github.com/SoundMindsAI/kings-taster-data/releases/download/../../evil/x"))
+        self.assertFalse(C.host_allowed("https://evil.example/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"))
+
+
+@unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")
+class TestListVerify(unittest.TestCase):
+    """decide() and verify_list() must use the official verifier (scripts/verify.sh / verify_release)."""
+
+    def setUp(self):
+        import shutil
+        from tests.helpers import T0, fetch_all, make_root, tmpdir
+        from tests.test_sign_verify import keygen, sign_dir
+        from kt import build as B
+
+        self.tmp = tmpdir(self)
+        keys = os.path.join(self.tmp, "keys")
+        os.makedirs(keys)
+        self.key, pub = keygen(keys, "cur")
+        self.allowed = os.path.join(self.tmp, "allowed")
+        with open(self.allowed, "w") as f:
+            f.write('kings-taster-current namespaces="kings-taster" %s\n' % pub)
+        self.root = make_root(self.tmp)
+        self.src = fetch_all(self.tmp, self.root)
+        self.out = os.path.join(self.tmp, "rel")
+        B.build(self.src, self.out, bootstrap=True, now=T0, root=self.root)
+        sign_dir(self.out, self.key)
+
+    def _vr(self, d=None, **kw):
+        kw.setdefault("allowed_signers", self.allowed)
+        kw.setdefault("now", "2026-11-27T06:17:00Z")
+        return C.verify_list(d or self.out, **kw)
+
+    def test_signed_release_verifies_and_decide_accepts_it(self):
+        vr = self._vr()
+        self.assertTrue(vr["ok"], vr)
+        self.assertTrue(hasattr(C, "verify_release"))
+        rec, _ = C.decide(
+            {"item_type": "package", "indicator_defanged": "pypi:bloomcredit-python@99.3.0",
+             "ecosystem": "PyPI", "name": "bloomcredit-python", "version": "99.3.0"},
+            [
+                _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
+                _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0},
+                     release_dir=self.out, allowed_signers=self.allowed),
+            ],
+            now="2026-11-27T06:17:00Z", finding_id=FID,
+            finding_path="~/.kings-taster/findings/%s.json" % FID,
+        )
+        self.assertEqual(validate_record(rec), [])
+        self.assertEqual(rec["result"], "no_known_reports")
+        self.assertNotIn("unverified_list", rec["reasons"])
+
+    def test_shard_mismatch_is_unverified(self):
+        shards = [n for n in os.listdir(self.out) if n.startswith("shard-") and n.endswith(".json")]
+        path = os.path.join(self.out, shards[0])
+        with open(path, "ab") as f:
+            f.write(b"\n")
+        vr = self._vr()
+        self.assertFalse(vr["ok"])
+        self.assertEqual(vr["reason"], "unverified_list")
+        self.assertTrue("shard" in vr["detail"].lower() or "hash" in vr["detail"].lower() or vr["detail"])
+
+    def test_latest_json_hash_mismatch_is_unverified(self):
+        iocs = os.path.join(self.out, "iocs.json")
+        with open(iocs, "ab") as f:
+            f.write(b"\n")
+        vr = self._vr()
+        self.assertFalse(vr["ok"])
+        self.assertEqual(vr["reason"], "unverified_list")
+
+    def test_rollback_state_is_refused(self):
+        state = os.path.join(self.tmp, "state.json")
+        # A later generated_at in state makes this release look rolled back.
+        with open(state, "w") as f:
+            f.write('{"generated_at": "2026-11-28T00:00:00Z", "latest_sha256": "%s", "tag": "kt-future"}\n' % ("a" * 64))
+        vr = self._vr(state=state)
+        self.assertFalse(vr["ok"])
+        self.assertEqual(vr["reason"], "unverified_list")
+        self.assertIn("rollback", vr["detail"].lower())
+
+    def test_missing_keys_json_refused_when_pins_published(self):
+        # Drive the official verifier's missing-keys path without publishing real pins.
+        from tests.test_keys import keygen as kgen, write_pins
+        import kt.keys as K
+        _priv, root_pub = kgen(self.tmp, "master")
+        _b, bak_pub = kgen(self.tmp, "master-backup")
+        pins = os.path.join(self.tmp, "root_pins")
+        write_pins(pins, root_pub, bak_pub)
+        orig = K.DEFAULT_PINS
+        K.DEFAULT_PINS = pins
+        try:
+            vr = self._vr()
+        finally:
+            K.DEFAULT_PINS = orig
+        self.assertFalse(vr["ok"], vr)
+        self.assertEqual(vr["reason"], "unverified_list")
+        self.assertIn("keys.json", vr["detail"].lower())
+
+    def test_module_names_the_official_verifier(self):
+        path = os.path.join(REPO, "kt", "check.py")
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("verify_release", src)
+        self.assertIn("scripts/verify.sh", src)
+        self.assertIn("keys.json", src)
+        self.assertIn("from . import verify", src)
