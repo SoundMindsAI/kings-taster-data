@@ -31,11 +31,11 @@ each citing its sources and their dates. It never says "safe".
 
 | Threat | Defense, and what's left |
 |---|---|
-| Prompt injection through a package name, IOC string, README, RDAP field or API response | Fixed extraction commands print only allowlisted, validated fields (IDs checked by regex, ISO dates, fixed values, booleans, versions). No free-text field reaches the AI. Raw responses go to a temp file the AI never reads. Any instruction-like or pattern-breaking value means Unknown (`injection_seen`). **Left:** an AI can still be fooled; we say so. |
+| Prompt injection through a package name, a known-bad indicator (IOC) string, README, domain-registration (RDAP) field or API response | Fixed extraction commands print only allowlisted, validated fields (IDs checked by regex, ISO dates, fixed values, booleans, versions). No free-text field reaches the AI. Raw responses go to a temp file the AI never reads. Any instruction-like or pattern-breaking value means Unknown (`injection_seen`). **What's left:** an AI can still be fooled, and we say so. |
 | A malicious project's own files (lockfile, `.npmrc`, build backend) | Binary-only resolution, `.npmrc` ignored, the default registry set on the command line, nothing ever built. |
 | A phishing link tuned to read clean | A domain under 30 days old, or with no RDAP record, gives Caution. A link with no link-reputation source set up gives Unknown. |
 | Mass false alarms on popular packages | `vulnerable` entries never Block. A malicious entry on a popular name is held at Caution (`pending_review`) until a person approves it, and approval also needs two distinct upstream origins (§7.2). |
-| Poisoning the pipeline | Only deterministic parsers of structured feeds; a circuit breaker on large changes, popular-name hits and carried-over sources; free text never copied. |
+| Poisoning the pipeline | The pipeline uses only deterministic parsers of structured feeds and never copies free text. A circuit breaker holds a build for human review when it makes large changes, hits a popular package name, or carries over a source from the previous release (§7.2). |
 | Stolen signing key, repo takeover, rollback | The private key never touches CI. Detached OpenSSH signatures; the current and next public keys are pinned; `generated_at` must only move forward; `revoked_entries` only grows; fixed release-asset URLs; branch protection and CODEOWNERS. |
 | A tampered local checker | The bot records the checker's SHA-256 at approval; if it changes, the bot falls back to checklist mode and asks again. |
 | Stolen API keys | Host allowlist, no redirects, keys read from an environment variable only, and the AI is told never to print them. |
@@ -59,7 +59,7 @@ An unverifiable list file makes the overall answer Unknown; live OSV Blocks and 
 "No known reports" is impossible.
 
 **Live OSV rule.** `MAL-` IDs and their aliases count as malicious (Block). Everything else counts as
-vulnerable (Caution, "upgrade to ≥ X"). A live malicious hit on a popular (top-10k) name is held at
+vulnerable (Caution, "upgrade to X or later"). A live malicious hit on a popular (top-10k) name is held at
 **Caution: "reported malicious by OSV, pending review"** until the list file carries an approved entry.
 
 | Answer | Fixed wording (the voice may change, the meaning may not) |
@@ -107,8 +107,11 @@ above; the list file and RDAP still run, and any Block or Caution they find is s
 
 ## 4B. Token budget
 
-- An always-on core of at most 120 words: the four results and their order, never "safe", every verdict
-  names a source and date, any failed check gives Unknown. Everything else is in skills loaded only when needed:
+King's Taster loads only the skill it needs. A normal check reads a few short fields and replies in five lines or fewer.
+
+- The always-on core is at most 120 words. It covers the four results and their order, never saying "safe",
+  naming a source and date in every verdict, and giving Unknown for any failed check. Everything else is in
+  skills loaded only when needed:
   `kings-taster-check` (400 words plus at most 150 lines of commands), `kings-taster-report` (250),
   `kings-taster-list-refresh` (200 plus at most 40 lines), and `kings-taster-build` (3,000 plus at most 300
   lines of snippets), which loads only to build or update the checker.
@@ -125,17 +128,15 @@ above; the list file and RDAP still run, and any Block or Caution they find is s
   file is cached for 7 days.
 - A normal check loads 2,000 words or fewer and never loads `kings-taster-build`.
 
-King's Taster loads only the skill it needs. A normal check reads a few short fields and replies in five lines or fewer.
-
 ## 5. Optional local checker
 
-Offered at first run, never on by default. The bot writes one standard-library-only Python file,
+King's Taster offers this checker at first run, and it is never on by default. The bot writes one standard-library-only Python file,
 `~/.kings-taster/checker.py`, from the build spec and reference snippets in `kings-taster-build`
 (canonicalization, `match_key`, field allowlists). It must pass 100% of `conformance.json` offline, then the
 online canaries, without ever running a package manager's install or build. Before first use the user sees its
 path, size, SHA-256, the hosts it may contact, the test results and a summary, and approves it. If it fails,
 is missing, changes or crashes, the bot uses checklist mode. It is written by the bot's AI and lives in files
-the user can edit, so it is more reliable, not tamper-proof.
+the user can edit, so it is more reliable than checklist mode, but it is not tamper-proof.
 
 ## 6. Data
 
@@ -147,8 +148,7 @@ the user can edit, so it is more reliable, not tamper-proof.
 | OpenSSF Malicious Packages (`MAL-` records) via the OSV.dev export, npm and PyPI | malicious | Apache-2.0 (entries whose origin is GitHub's malware advisories also CC-BY 4.0) | ID, package name, versions or ranges, aliases (ID pattern only), published/modified, origin source names |
 
 No other source is in the list file. Free-text fields (summaries, details, descriptions, references, credits,
-required actions, notes) are never copied. Never used: leaked data, leak or paste sites, .onion sites,
-proof-of-concept code, malware samples. See `sources/LICENSES.md`.
+required actions, notes) are never copied. We never use leaked data, leak or paste sites, .onion sites, proof-of-concept code or malware samples. See `sources/LICENSES.md`.
 
 ### 6.2 List entry (`schema/iocs.schema.json`)
 
@@ -167,12 +167,13 @@ Each entry: `id`, `type` (domain, url, ip, hash, package, repo_owner, cve), `val
 
 ### 6.3 Retirement
 
-IP 30 days, URL 90 days, domain 180 days unless re-listed; hashes, packages and CVEs never. A retired entry
-gives "Caution: previously listed".
+An IP entry retires 30 days after its source last listed or updated it, a URL entry after 90 days and a domain
+entry after 180 days. If the source lists it again, the count starts over. Hash, package and CVE entries never
+retire. A retired entry gives "Caution: previously listed".
 
 ### 6.4 Freshness
 
-Package and hash data: 48 hours, after which the list file counts as stale (Unknown). URLs, domains and IPs
+Package and hash data stays fresh for 48 hours, after which the list file counts as stale (Unknown). URLs, domains and IPs
 are always checked live as well.
 
 ## 7. Pipeline and signing
@@ -192,12 +193,12 @@ build stops. All actions are pinned to full commit SHAs. The code uses the Pytho
   bots treat it as Caution, never Block. It becomes `approved` only when the owner adds it to
   `review/popular-approvals.json` **and** it has at least two distinct upstream origins.
 - The build is marked as needing human review when it is the first release, adds or removes more entries than
-  `config/limits.json` allows, revokes many entries, has a new popular-name hit, or carried a source over.
+  `config/limits.json` allows, revokes many entries, has a new popular-name hit, or carries a source over.
   Such a build is not published until a person accepts it.
 
 ### 7.3 Signing and release
 
-- Signed outside CI by the repo owner with `ssh-keygen -Y sign`, Ed25519, namespace **`kings-taster`**, one
+- The repo owner signs outside CI with `ssh-keygen -Y sign`, using Ed25519 and the namespace **`kings-taster`**, with one
   detached `.sig` per file. `config/allowed_signers` holds at most two public keys:
   `kings-taster-current` and `kings-taster-next`.
 - Before signing, the owner's script re-validates the artifact, verifies the live release, and requires that
@@ -274,7 +275,7 @@ Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at 
 
 ## 11. Disputes
 
-Email support@soundminds.ai or open an issue in this repo. We acknowledge within 2 business days. A wrong
+If you think a list entry is wrong, email support@soundminds.ai or open an issue in this repo. We acknowledge within 2 business days. A wrong
 entry is revoked in the next signed file, or right away through `paused` or `revoked_entries`.
 
 ## 12. Versioning

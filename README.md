@@ -63,7 +63,7 @@ scripts/install-hooks.sh                           # pre-push secret scan
 
 ## Disputes
 
-Email support@soundminds.ai or open an issue. We acknowledge within 2 business days.
+If you think a list entry is wrong, email support@soundminds.ai or open an issue. We acknowledge within 2 business days.
 
 ## Data notice
 
