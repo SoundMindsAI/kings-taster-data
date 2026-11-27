@@ -5,6 +5,7 @@ import re
 import tempfile
 import unittest
 
+from kt import build as B
 from kt import check as C
 from tests.helpers import REPO
 
@@ -16,14 +17,7 @@ SHA = "ab" * 32
 with open(os.path.join(REPO, "conformance", "cases.json"), encoding="utf-8") as _fh:
     CASES = json.load(_fh)["cases"]
 
-# SPEC has not settled the expected user-facing result for a list canary: the cases
-# expect Block / malicious_match, while decide() skips "canary:" ids by design.
-UNSETTLED_CANARY_LIST = {
-    "canary-list-npm", "canary-list-pypi", "canary-list-domain", "canary-list-url",
-    "canary-list-ip", "canary-list-repo-owner", "req-link-no-key-but-list-block",
-}
-
-SKIP = dict.fromkeys(UNSETTLED_CANARY_LIST, "SPEC has not settled the result for a list canary")
+SKIP = {}
 SKIP.update({
     "canary-safe-browsing-test-url": "needs a live Safe Browsing response for Google's test URL",
     "inject-npm-readme": "needs the npm registry extractor, which decide() has no source for",
@@ -74,6 +68,41 @@ def _list_hit(item, review_state):
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"entries": [entry]}, fh)
         r = C.run_extractor("list", path, key)
+    assert r.returncode == 0, r.stderr
+    return C.parse_extracted(r.stdout)
+
+
+def _canary_for(item):
+    """The reserved list canary entry the item under check is, or None."""
+    with open(os.path.join(REPO, "config", "canaries.json"), encoding="utf-8") as fh:
+        entries = B.canary_entries(json.load(fh), None)
+    ind = item["indicator_defanged"]
+    if item["item_type"] == "package":
+        keys = {"%s:%s" % ("npm" if item["ecosystem"] == "npm" else "pypi", item["name"])}
+    elif item["item_type"] == "repo":
+        keys = {"github:" + ind.split(":", 1)[1].split("/")[0].lower()}
+    else:
+        url = ind.replace("hxxp", "http").replace("[.]", ".")
+        host = url.split("://", 1)[1].split("/", 1)[0]
+        keys = {"domain:" + host, "ip:" + host}
+        if not url.endswith("%s/" % host):
+            keys.add(B.match_key("url", url))
+    matches = [e for e in entries if e["match_key"] in keys]
+    # A URL canary also shares the domain host; prefer the more specific type.
+    rank = {"url": 0, "ip": 1, "domain": 2}
+    matches.sort(key=lambda e: rank.get(e["type"], 9))
+    return matches[0] if matches else None
+
+
+def _canary_hit(entry):
+    """Run the real list extractor over a one-entry shard carrying the canary."""
+    shard = {"id": entry["id"], "match_key": entry["match_key"], "type": entry["type"],
+             "first_seen": "2026-11-26", "canary": True, "review_state": "auto"}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "shard.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"entries": [shard]}, fh)
+        r = C.run_extractor("list", path, entry["match_key"])
     assert r.returncode == 0, r.stderr
     return C.parse_extracted(r.stdout)
 
@@ -138,6 +167,10 @@ def _build_source(name, token, item):
             return _src(name, {}, status="not_configured", http_status=None)
     elif name == "kings_taster_list":
         if token == "verified":
+            # A real verified list always carries the reserved canary entries.
+            canary = _canary_for(item)
+            if canary:
+                return _src(name, _canary_hit(canary), verified=True)
             return _src(name, dict(CLEAN_LIST), verified=True)
         if token == "verified_entry_revoked":
             return _src(name, dict(CLEAN_LIST), verified=True)  # revoked entries are absent from shards
@@ -202,6 +235,7 @@ class TestPopularListRuleAgreement(unittest.TestCase):
         flat = " ".join(body.split())
         self.assertIn("list hit with review_state pending_review is Caution, never Block", flat)
         self.assertIn("review_state=%s", commands)
+        self.assertIn("Classify the item (package, repo, or link). Run every required source.", flat)
         by_id = {c["id"]: c for c in CASES}
         for cid, hold in (("prec-popular-list-pending", True), ("prec-popular-list-approved", False)):
             rec, _ = _run_case(by_id[cid])

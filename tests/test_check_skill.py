@@ -352,8 +352,7 @@ class TestDecisions(unittest.TestCase):
         self.assertIn("malicious_match", rec["reasons"])
 
     def test_list_hit_with_canary_flag_but_real_id_still_blocks(self):
-        # N1: a real entry mislabelled canary=yes is still a list match. Only the
-        # build-assigned "canary:" ids are skipped.
+        # N1: a real entry mislabelled canary=yes is still a list match.
         real = {"id": "kt:pypi:bloomcredit-python", "type": "package", "date": "2026-11-26", "canary": True}
         rec, _ = self._decide(self._package(), [
             _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
@@ -362,14 +361,24 @@ class TestDecisions(unittest.TestCase):
         self.assertEqual(rec["result"], "block")
         self.assertIn("malicious_match", rec["reasons"])
         self.assertTrue(any(m["id"] == real["id"] for m in rec["matched_entries"]), rec["matched_entries"])
-        # A genuine canary id is skipped, whatever its flag says.
-        canary = {"id": "canary:package:pypi", "type": "package", "date": "2026-11-26", "canary": True}
-        rec2, _ = self._decide(self._package(), [
+
+    def test_reserved_canary_item_blocks(self):
+        # The item under check is a reserved list canary (id from the build), so
+        # the match_key-filtered hit is a firm list hit.
+        item = {"item_type": "package", "ecosystem": "npm", "name": "kings-taster-canary-npm",
+                "version": "1.0.0", "indicator_defanged": "npm:kings-taster-canary-npm@1.0.0"}
+        canary = {"id": "canary:package:npm", "type": "package", "date": "2026-11-26", "canary": True}
+        rec, _ = self._decide(item, [
             _src("osv", {"class": "clean", "hits": [], "osv_count": 0}),
             _src("kings_taster_list", {"class": "malicious", "hits": [canary], "list_hits": 1}, verified=True),
         ])
-        self.assertEqual(rec2["result"], "no_known_reports")
-        self.assertNotIn("malicious_match", rec2["reasons"])
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertTrue(any(m["id"] == canary["id"] for m in rec["matched_entries"]), rec["matched_entries"])
+
+    def test_skill_states_reserved_canary_rule(self):
+        flat = " ".join(C.split_skill()[0].split())
+        self.assertIn("including a reserved list canary item", flat)
 
     def _shard_extract(self, tmp, key, review_state=None, entry_id="kt:npm:lodash"):
         entry = {"id": entry_id, "match_key": key, "type": "package",

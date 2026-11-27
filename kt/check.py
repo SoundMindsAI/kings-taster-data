@@ -479,12 +479,12 @@ def decide(item, sources, *, popular=None, health=None, now="2026-11-27T00:00:00
                 reasons.append("unverified_list")
                 entry["status"] = "failed"
                 continue
-            # Only the build-assigned "canary:" ids are canaries. A hit that merely
-            # carries canary=yes is real list data and must still block.
-            hits = [h for h in (extracted.get("hits") or [])
-                    if not str(h.get("id") or "").startswith("canary:")]
+            # Hits are already filtered by match_key, so a build-assigned "canary:" id
+            # means the item under check is that reserved list canary: it blocks like
+            # any other list hit. A canary=yes flag on a real id changes nothing.
+            hits = list(extracted.get("hits") or [])
             # A pending_review hit (popular name, SPEC.md §7.2) is held at Caution;
-            # any other non-canary hit, including approved and auto, blocks.
+            # any other hit, including approved, auto and reserved canaries, blocks.
             firm = [h for h in hits if h.get("review_state") != "pending_review"]
             held = [h for h in hits if h.get("review_state") == "pending_review"]
             url = "https://github.com/SoundMindsAI/kings-taster-data/"
