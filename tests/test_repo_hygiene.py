@@ -99,11 +99,15 @@ class TestSecretScan(unittest.TestCase):
         self.assertTrue(any("skipped_binary" in x for x in out["flag"]), out)
 
     def test_text_file_with_binary_extension_is_scanned(self):
+        # A text secret renamed to .png, with no NUL in the first 8192 bytes, must be caught.
         d = tmpdir(self)
-        self._write(d, "notes.png", (FAKE["aws_access_key"] + "\n").encode())
+        payload = (FAKE["aws_access_key"] + "\n").encode()
+        self.assertNotIn(b"\0", payload)
+        self._write(d, "notes.png", payload)
         out = {"fail": [], "flag": []}
         secret_scan.scan_tree(d, out)
         self.assertTrue(any("aws_access_key" in x for x in out["fail"]), out)
+        self.assertFalse(any("skipped_binary" in x for x in out["flag"]), out)
         self.assertEqual(out["flag"], [])
         self.assertEqual(secret_scan.main([d]), 1)
 

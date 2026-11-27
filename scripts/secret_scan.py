@@ -115,6 +115,9 @@ def scan_tree(root, out):
     count = 0
     for p in iter_files(root):
         try:
+            # A file is skipped only when it has a binary extension and its first
+            # 8192 bytes contain a NUL. That's the fail-closed choice, so a text
+            # secret renamed to .png is still scanned.
             if os.path.splitext(p)[1].lower() in BINARY_EXTS:
                 with open(p, "rb") as f:
                     head = f.read(8192)
