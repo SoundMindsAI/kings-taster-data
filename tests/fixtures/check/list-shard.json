@@ -1,0 +1,1 @@
+{"entries": [{"id": "kt:pypi:bloomcredit-python", "match_key": "pypi:bloomcredit-python", "type": "package", "first_seen": "2026-11-26", "canary": false}, {"id": "kt:canary-npm", "match_key": "npm:kings-taster-canary-npm", "type": "package", "first_seen": "2026-11-26", "canary": true}]}

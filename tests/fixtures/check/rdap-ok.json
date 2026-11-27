@@ -1,0 +1,1 @@
+{"ldhName": "EXAMPLE.COM", "events": [{"eventAction": "registration", "eventDate": "1995-08-14T04:00:00Z"}, {"eventAction": "expiration", "eventDate": "2027-08-13T04:00:00Z"}], "status": ["active"], "remarks": [{"title": "must not be printed", "description": ["drop me"]}]}
