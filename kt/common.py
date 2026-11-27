@@ -8,6 +8,8 @@ import tempfile
 import urllib.error
 import urllib.request
 
+from . import urlcheck
+
 ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
 USER_AGENT = "kings-taster-data-pipeline/1.0 (+https://github.com/SoundMindsAI/kings-taster-data)"
 
@@ -156,10 +158,10 @@ def fetch(url, dest_path, max_bytes, timeout=120):
     Returns evidence: {url, http_status, response_sha256, bytes, last_modified, fetched_at}.
     Raises FetchError (with evidence) on any non-200, oversize, or disallowed host.
     """
-    m = re.match(r"^https://([^/:?#]+)/", url)
+    parsed = urlcheck.parse_https_url(url)
     evidence = {"url": url, "http_status": None, "response_sha256": None, "bytes": 0,
                 "last_modified": None, "fetched_at": fmt_time(utc_now())}
-    if not m or m.group(1) not in FETCH_ALLOWLIST:
+    if not parsed or "/" not in url[len("https://"):] or parsed[0] not in FETCH_ALLOWLIST:
         raise FetchError("host not on the fetch allowlist", evidence)
     opener = urllib.request.build_opener(_NoRedirect)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})

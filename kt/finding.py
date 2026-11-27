@@ -8,10 +8,10 @@ import os
 import re
 import sys
 import unicodedata
-from urllib.parse import unquote, urlsplit
 
 from . import jsonschema_lite
 from .common import loads_strict, parse_time
+from .urlcheck import official_link_ok
 
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "schema", "finding-record.schema.json")
 
@@ -56,23 +56,9 @@ def _normalize_text(s):
 
 def official_url_problem(url, allowed_hosts):
     """None if url is a plain https link on an allowed host with no dot or empty path segments."""
-    if "\\" in url or re.search(r"%2e|%2f|%5c", url, re.IGNORECASE):
-        return "encoded dot, slash or backslash"
-    try:
-        parts = urlsplit(url)
-        port = parts.port
-    except ValueError:
-        return "unparsable"
-    host = (parts.hostname or "").lower()
-    if parts.scheme != "https" or host not in allowed_hosts or port is not None or parts.username or parts.password:
-        return "not an official https host"
-    path = parts.path
-    decoded = path
-    for _ in range(3):
-        decoded = unquote(decoded)
-    segs = decoded.split("/")[1:]
-    if any(s in (".", "..") for s in segs) or "" in segs[:-1]:
-        return "dot or empty path segment"
+    problem, host, decoded = official_link_ok(url, allowed_hosts)
+    if problem:
+        return problem
     if host == "github.com" and not (decoded == "/advisories" or decoded.startswith(("/advisories/",) + GITHUB_OFFICIAL_PATHS[1:])):
         return "github.com link outside advisories and the kings-taster-data repo"
     return None
