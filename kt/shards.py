@@ -53,6 +53,14 @@ def gzip_size(b):
     return len(gzip.compress(b, compresslevel=9, mtime=0))
 
 
+def looks_like_shard_filename(name):
+    """True if the name starts with shard- after an optional leading dot, in any case and with any extension (for example shard-foo.txt, .shard-kev.json, SHARD-kev.json)."""
+    if not isinstance(name, str) or not name or name in (".", ".."):
+        return False
+    base = name[1:] if name.startswith(".") else name
+    return base.lower().startswith("shard-")
+
+
 def prefix_config(limits):
     cfg = dict(DEFAULT_PREFIX_BYTES)
     cfg.update((limits.get("shards") or {}).get("prefix_bytes", {}))
@@ -141,7 +149,7 @@ def validate_shards(d, manifest, iocs=None, require_all=True, limits_caps=None):
     if manifest["counts"]["shards"] != len(names):
         errors.append("manifest: shard count mismatch")
     listed = {s["file"] for s in manifest["shards"]}
-    extra = [n for n in os.listdir(d) if n.startswith("shard-") and n not in listed]
+    extra = [n for n in os.listdir(d) if looks_like_shard_filename(n) and n not in listed]
     if extra:
         errors.append("release dir holds %d shard file(s) the manifest doesn't list" % len(extra))
     total, by_group, by_type, revoked_total = 0, {}, {}, 0

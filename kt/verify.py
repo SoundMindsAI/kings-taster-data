@@ -20,8 +20,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
-from .common import loads_strict, parse_time, sha256_file, utc_now, write_json, read_json
+from .common import loads_strict, parse_time, sha256_bytes, sha256_file, utc_now, write_json, read_json
 from . import shards as SH
 from .validate import MAX_MANIFEST_BYTES, RELEASE_FILES, check_not_future, validate_latest, validate_manifest
 
@@ -76,7 +77,7 @@ def _ssh_keygen():
     return exe
 
 
-def verify_file(path, allowed):
+def verify_file(path, allowed, namespace=NAMESPACE, principals=PRINCIPALS, data=None):
     sig = path + ".sig"
     if not os.path.exists(sig):
         raise VerifyError("%s: signature missing" % os.path.basename(path))
@@ -87,24 +88,74 @@ def verify_file(path, allowed):
     if sig_bytes.count(b"-----BEGIN SSH SIGNATURE-----") != 1 or sig_bytes.count(b"-----END SSH SIGNATURE-----") != 1:
         raise VerifyError("%s: signature file must hold exactly one signature" % os.path.basename(path))
     exe = _ssh_keygen()
-    fp = subprocess.run([exe, "-Y", "find-principals", "-s", sig, "-f", allowed, "-n", NAMESPACE],
+    fp = subprocess.run([exe, "-Y", "find-principals", "-s", sig, "-f", allowed, "-n", namespace],
                         capture_output=True, text=True, timeout=30)
-    principals = [p for p in fp.stdout.split() if p in PRINCIPALS]
-    if fp.returncode != 0 or len(principals) != 1:
+    found = [p for p in fp.stdout.split() if p in principals]
+    if fp.returncode != 0 or len(found) != 1:
         raise VerifyError("%s: not signed by an allowed key" % os.path.basename(path))
-    with open(path, "rb") as data:
-        v = subprocess.run([exe, "-Y", "verify", "-f", allowed, "-I", principals[0], "-n", NAMESPACE, "-s", sig],
-                           stdin=data, capture_output=True, text=True, timeout=60)
-    out = v.stdout + v.stderr
-    if v.returncode != 0 or "Good \"%s\" signature for %s with ED25519 key" % (NAMESPACE, principals[0]) not in out:
+    if data is None:
+        with open(path, "rb") as f:
+            data = f.read()
+    v = subprocess.run([exe, "-Y", "verify", "-f", allowed, "-I", found[0], "-n", namespace, "-s", sig],
+                       input=data, capture_output=True, timeout=60)
+    out = ((v.stdout or b"") + (v.stderr or b"")).decode("utf-8", "replace")
+    if v.returncode != 0 or "Good \"%s\" signature for %s with ED25519 key" % (namespace, found[0]) not in out:
         raise VerifyError("%s: signature did not verify" % os.path.basename(path))
-    return principals[0]
+    return found[0]
+
+
+def _keys_state(state):
+    """Last accepted keys.json time and hash, if the state file has them."""
+    if not state or not os.path.exists(state):
+        return None, None
+    st = read_json(state)
+    if not isinstance(st, dict):
+        raise VerifyError("state file is not valid")
+    prev_at, prev_sha = st.get("keys_generated_at"), st.get("keys_sha256")
+    if prev_at is not None and not isinstance(prev_at, str):
+        raise VerifyError("state file is not valid")
+    if prev_sha is not None and not isinstance(prev_sha, str):
+        raise VerifyError("state file is not valid")
+    return prev_at, prev_sha
 
 
 def verify_release(d, allowed, state=None, update_state=False, template_version=None, now=None,
                    max_age_hours=48, require_shards=False):
     check_allowed_signers(allowed)
-    signers = {name: verify_file(os.path.join(d, name), allowed) for name in FILES}
+    now = now or utc_now()
+    keys_doc = keys_raw = None
+    daily_allowed = allowed
+    tmp_allowed = None
+    try:
+        keys_path = os.path.join(d, "keys.json")
+        if os.path.exists(keys_path) or os.path.exists(keys_path + ".sig"):
+            from . import keys as K
+            prev_at, prev_sha = _keys_state(state)
+            try:
+                keys_doc, keys_raw, _ = K.verify_keys_file(
+                    keys_path, K.DEFAULT_PINS, now=now,
+                    previous_generated_at=prev_at, previous_sha256=prev_sha)
+            except (K.KeysError, VerifyError, OSError, ValueError) as e:
+                raise VerifyError("keys.json: %s" % e)
+            text = K.allowed_signers_text(keys_doc, now=now)
+            if not text.strip():
+                raise VerifyError("keys.json has no usable signing key")
+            tmp_allowed = tempfile.mkdtemp(prefix="kt-allowed-")
+            daily_allowed = os.path.join(tmp_allowed, "allowed_signers")
+            with open(daily_allowed, "w", encoding="utf-8") as f:
+                f.write(text)
+            check_allowed_signers(daily_allowed)
+        signers = {name: verify_file(os.path.join(d, name), daily_allowed) for name in FILES}
+        if keys_doc is not None:
+            from . import keys as K
+            for name, principal in signers.items():
+                fp = next((k["fingerprint"] for k in keys_doc["signing_keys"] if k["principal"] == principal), None)
+                if not fp or not K.signing_key_usable(keys_doc, now=now, fingerprint=fp, principal=principal):
+                    raise VerifyError("%s: signed by a key that keys.json does not allow" % name)
+    finally:
+        if tmp_allowed:
+            shutil.rmtree(tmp_allowed, ignore_errors=True)
+
     with open(os.path.join(d, "latest.json"), "rb") as f:
         raw = f.read()
     try:
@@ -128,7 +179,6 @@ def verify_release(d, allowed, state=None, update_state=False, template_version=
     errs = SH.validate_shards(d, manifest, require_all=require_shards)
     if errs:
         raise VerifyError("shard check failed: " + errs[0])
-    now = now or utc_now()
     errs = check_not_future(latest["generated_at"], now)
     if errs:
         raise VerifyError(errs[0])
@@ -151,7 +201,17 @@ def verify_release(d, allowed, state=None, update_state=False, template_version=
     if (now - gen).total_seconds() > max_age_hours * 3600:
         return 5, "STALE: generated_at %s is older than %d hours" % (latest["generated_at"], max_age_hours)
     if state and update_state:
-        write_json(state, {"generated_at": latest["generated_at"], "latest_sha256": sha, "tag": latest["tag"]})
+        st = {"generated_at": latest["generated_at"], "latest_sha256": sha, "tag": latest["tag"]}
+        if keys_doc is not None:
+            st["keys_generated_at"] = keys_doc["generated_at"]
+            st["keys_sha256"] = sha256_bytes(keys_raw)
+        elif os.path.exists(state):
+            prev = read_json(state)
+            if isinstance(prev, dict) and isinstance(prev.get("keys_generated_at"), str):
+                st["keys_generated_at"] = prev["keys_generated_at"]
+                if isinstance(prev.get("keys_sha256"), str):
+                    st["keys_sha256"] = prev["keys_sha256"]
+        write_json(state, st)
     if latest["paused"]:
         return 3, "PAUSED: King's Taster is paused (%s), tag %s" % (latest["paused_reason"], latest["tag"])
     return 0, "VERIFIED: tag %s generated_at %s signed by %s" % (

@@ -30,9 +30,9 @@ def parse_time(s):
     """Parse an ISO-8601 UTC time (Z suffix, optional fraction) or a YYYY-MM-DD date."""
     if not isinstance(s, str):
         raise ValueError("time must be a string")
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s, re.ASCII):
         return _dt.datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=_dt.timezone.utc)
-    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d{1,9})?(Z|[+-]00:00)", s)
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d{1,9})?(Z|[+-]00:00)", s, re.ASCII)
     if not m:
         raise ValueError("not an ISO UTC time: %r" % s[:40])
     return _dt.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=_dt.timezone.utc)

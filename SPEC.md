@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.4, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.5, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -37,7 +37,7 @@ each citing its sources and their dates. It never says "safe".
 | A phishing link tuned to read clean | A domain under 30 days old, or with no RDAP record, gives Caution. A link with no link-reputation source set up gives Unknown. |
 | Mass false alarms on popular packages | `vulnerable` entries never Block. A malicious entry on a popular name is held at Caution (`pending_review`) until a person approves it, and approval also needs two distinct upstream origins (§7.2). |
 | Poisoning the pipeline | The pipeline uses only deterministic parsers of structured feeds and never copies free text. A circuit breaker holds a build for human review when it adds, removes or withdraws too many entries at once, hits a popular package name, carries over a source from the previous release, or is the very first release (§7.2). |
-| Stolen signing key, repo takeover, rollback | The private key never touches CI. Detached OpenSSH signatures; the current and next public keys are pinned; `generated_at` must only move forward; `revoked_entries` only grows; fixed release-asset URLs; branch protection and CODEOWNERS. |
+| Stolen signing key, repo takeover, rollback | The private key never touches CI. Detached OpenSSH signatures; the current and next public keys are pinned; a signed `keys.json` will name those keys once it is published (§7.3A); `generated_at` must only move forward; `revoked_entries` only grows; fixed release-asset URLs; branch protection and CODEOWNERS. |
 | A tampered local checker | The bot records the checker's SHA-256 at approval; if it changes, the bot falls back to checklist mode and asks again. |
 | Stolen API keys | Host allowlist, no redirects, keys read from an environment variable only, and the AI is told never to print them. |
 
@@ -356,6 +356,29 @@ build stops. All actions are pinned to full commit SHAs. The code uses the Pytho
   (or `-I kings-taster-next`), then check each file's hash against `latest.json` and its `file_type`, and each
   shard you use against `manifest.json`. `scripts/verify.sh` does all of this.
 
+### 7.3A The keys file (`keys.json`)
+
+The daily signing keys in `config/allowed_signers` will also be named in a signed `keys.json` once the first
+keys.json is published. That file is not published yet.
+
+- **What it holds.** `keys.json` lists the current signing key and, if there is one, the next key: each key's
+  role, principal (`kings-taster-current` or `kings-taster-next`), algorithm (`ssh-ed25519`), public key,
+  SHA-256 fingerprint, and validity window. A window is at most 90 days. Old keys are listed under
+  `revoked_keys` with a fixed reason (`rotated`, `compromised` or `retired`). There are no free-text fields.
+- **How it is signed.** A detached OpenSSH signature (`keys.json.sig`, Ed25519, namespace `kings-taster-keys`)
+  covers the canonical JSON bytes of `keys.json` (the one standard, byte-for-byte form of the file). The signature must be made by one of the two master public
+  keys, `kings-taster-root` or `kings-taster-root-backup`. `keys.json` must be 64 KiB or smaller (65,536 bytes). Those public keys will be published in
+  `config/root_pins` and in SECURITY.md. Master keys are held only by the maintainer, in two separate places,
+  never by a bot or the signing computer. The private signing key that signs the daily files never touches CI.
+- **How a client will verify it.** The client pins both master public-key fingerprints. It checks the
+  signature against those pins, that the file is canonical and matches the schema, that `generated_at` only
+  moves forward and isn't more than 5 minutes ahead, and that a daily file was signed by a key that is listed,
+  unexpired and not revoked (checked by that key's fingerprint, not only its name).
+  Anything else is refused (the bot will treat the list as unverifiable and answer Unknown).
+- **Until the first signed file is published.** `config/root_pins` holds no public keys yet. Daily files still
+  verify against `config/allowed_signers` as in §7.3, so a release can still be verified without a `keys.json`.
+  If a `keys.json` is present, it is refused until the master public-key pins are published.
+
 ### 7.4 Rollback, pause and revocation
 
 - A bot rejects any `latest.json` whose `generated_at` is older than the last one it accepted (or equal with
@@ -505,3 +528,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 | 1.2 | 2026-11-26 | Adds §4D (the weekly health check and `status`), the `kings-taster-health` skill, the planned daily pipeline health check and size cap (§7.5), and the data sharing rules (§10.1). Folds the weekly routing check into the health check, so there are two routines. |
 | 1.3 | 2026-11-26 | Adds the planned sharded list (§6.5): shards by ecosystem or type and hash prefix, a signed manifest, per-shard caching and caps, and what a shard download shows GitHub. Clarifies that a failing checker switches the bot to checklist mode rather than answering Unknown, and that the size caps are planned. |
 | 1.4 | 2026-11-26 | Builds the sharded list (§6.5): `manifest.json` (signed) and 518 shards, npm and PyPI split by the first byte of SHA-256(`match_key`), one shard each for KEV and the other types, with 5 MB caps enforced by the build and validator. Adds the first-run connectivity check (§4D) and its pre-send rule (§10.1), with conformance cases. States the signature-file size limit and the allowed-signers option rules (§7.3). |
+| 1.5 | 2026-11-27 | Adds §7.3A: the format and verifier for a signed `keys.json` that will name the current and next daily signing keys, with a 90-day validity window, `revoked_keys`, and signature namespace `kings-taster-keys`. The first signed `keys.json` and the master public-key pins are not published yet. Until they are, daily files still verify against `config/allowed_signers`, and a `keys.json` that is present is refused. A `keys.json` must be 64 KiB or smaller (65,536 bytes), and its `generated_at` may not be more than 5 minutes ahead. |
