@@ -24,6 +24,8 @@ This describes the King's Taster bot once it's available from the install page.
 
 When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what you ask it to check and what comes back, like anything else you ask it, and it also sees any key you add. A finding is shared only when you approve the exact post, each time.
 
+The bot will also offer, once, to post a public reply with fixed text and its version number, so you can see it's connected. It asks first, and the reply carries no finding data.
+
 The full rules are in [SPEC.md §10.1](SPEC.md#101-data-sharing-rules).
 
 ## What's in a release
