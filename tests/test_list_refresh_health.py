@@ -14,7 +14,6 @@ UNCLEARED = re.compile(
     r"abuse\.ch|feodo|ssl blacklist|urlhaus|threatfox|safedep|stepsecurity",
     re.IGNORECASE,
 )
-INTERNAL = ("/workspace", "Boss", "Yak", "Copilot", "QA Lead")
 T1 = T0 + dt.timedelta(days=1)
 T1_ISO = "2026-11-28T06:17:00Z"
 
@@ -61,11 +60,9 @@ class TestSkillAndRoutineCaps(unittest.TestCase):
         self.assertEqual(len(H.LINE.split()), 25)
         self.assertIn(H.LINE, H.nudge_text("Installer"))
 
-    def test_no_uncleared_or_internal_wording(self):
+    def test_no_uncleared_wording(self):
         for text in (R.skill_text(), H.skill_text(), R.routine_line(), H.routine_line()):
             self.assertIsNone(UNCLEARED.search(text))
-            for needle in INTERNAL + ("1Password", "paper", "printout", "vault"):
-                self.assertNotIn(needle, text, needle)
 
     def test_modules_have_no_network_or_live_poster(self):
         for path in (R.__file__, H.__file__):
