@@ -94,7 +94,7 @@ its source's own terms and carries its own `license`, `attribution`, `upstream_o
   CISA or DHS, and no CISA logo or DHS seal is used.
   Terms: <https://github.com/cisagov/kev-data/blob/develop/LICENSE> ·
   Catalog: <https://www.cisa.gov/known-exploited-vulnerabilities-catalog>
-- **OpenSSF Malicious Packages (`MAL-` records, via OSV.dev):** Apache-2.0; a copy of the license ships with
+- **OpenSSF Malicious Packages (`MAL-` records, via OSV.dev):** Apache-2.0; a copy of the license will ship with
   every release as `Apache-2.0.txt`. Entries whose origin is GitHub's malware advisories also carry
   CC-BY 4.0 attribution to the GitHub Advisory Database.
   Terms: <https://github.com/ossf/malicious-packages/blob/main/LICENSE> ·
