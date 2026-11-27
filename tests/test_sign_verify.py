@@ -1,4 +1,5 @@
 """Signing and verification with throwaway keys made in a temp dir (never committed)."""
+import glob
 import json
 import os
 import shutil
@@ -323,6 +324,56 @@ class TestSignAndRelease(SignAndReleaseBase):
         self.assertEqual(rc, 1)
         self.assertIn("circuit breaker tripped", out)
         self.assertNotIn(self.key, out)
+
+    def _mutated_artifact(self, mutate):
+        d = os.path.join(self.tmp, "mutated")
+        shutil.copytree(self.unsigned, d)
+        p = os.path.join(d, "build-report.json")
+        with open(p, encoding="utf-8") as f:
+            raw = f.read()
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(mutate(raw))
+        return d
+
+    def test_breaker_fails_closed_on_bad_report(self):
+        def drop_key(raw):
+            r = json.loads(raw)
+            del r["needs_human"]
+            return json.dumps(r)
+
+        def not_bool(raw):
+            r = json.loads(raw)
+            r["needs_human"] = "false"
+            return json.dumps(r)
+
+        cases = {"empty object": lambda raw: "{}", "not json": lambda raw: "not json at all",
+                 "missing key": drop_key, "non-boolean": not_bool}
+        for name, mutate in cases.items():
+            with self.subTest(case=name):
+                d = self._mutated_artifact(mutate)
+                keep = os.path.join(self.tmp, "signed-" + name.replace(" ", "-"))
+                for extra in ((), ("--accept-breaker",)):
+                    rc, out = self.run_script("--from-dir", d, "--dry-run", "--bootstrap", *extra,
+                                              env_extra={"KT_DRY_RUN_OUT": keep})
+                    self.assertNotEqual(rc, 0, out)
+                    self.assertIn("needs_human", out)
+                    self.assertNotIn("DRY RUN OK", out)
+                    self.assertNotIn(self.key, out)
+                    self.assertFalse(os.path.exists(keep))
+                    self.assertFalse(glob.glob(os.path.join(d, "*.sig")))
+                shutil.rmtree(d)
+
+    def test_breaker_explicit_false_continues(self):
+        def set_false(raw):
+            r = json.loads(raw)
+            r["needs_human"] = False
+            return json.dumps(r)
+        d = self._mutated_artifact(set_false)
+        rc, out = self.run_script("--from-dir", d, "--dry-run", "--bootstrap")
+        self.assertNotIn("circuit breaker tripped", out)
+        self.assertNotIn("needs_human", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("DRY RUN OK", out)
 
     def test_dry_run_signs_and_verifies(self):
         keep = os.path.join(self.tmp, "signed")

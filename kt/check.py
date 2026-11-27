@@ -292,14 +292,36 @@ def _status_of(src):
         return "not_configured"
     if code in (403, 429) or src.get("status") == "rate_limited":
         return "rate_limited"
-    extracted = src.get("extracted") or {}
-    if extracted.get("class") == "injection_seen" or src.get("status") == "injection_seen":
+    extracted = src.get("extracted")
+    if (isinstance(extracted, dict) and extracted.get("class") == "injection_seen") or src.get("status") == "injection_seen":
         return "failed"
     if src.get("status") == "failed" or (code and not (200 <= int(code) < 300)):
         return "failed"
-    if src.get("canary_ok") is False:
+    # Missing evidence is failed evidence: canary_ok must be exactly True and extracted a dict.
+    if src.get("canary_ok") is not True or not isinstance(extracted, dict):
         return "failed"
-    return src.get("status") or "ok"
+    if not _has_evidence(src.get("source"), extracted):
+        return "failed"
+    if src.get("status") not in (None, "ok"):
+        return "failed"
+    return "ok"
+
+
+def _has_evidence(source, extracted):
+    cls = extracted.get("class")
+    if source == "osv":
+        return cls in ("clean", "vulnerable", "malicious")
+    if source == "kings_taster_list":
+        hits = extracted.get("hits")
+        return cls == "clean" or (isinstance(hits, list) and len(hits) > 0)
+    if source == "safe_browsing":
+        return cls in ("clean", "hit")
+    if source == "rdap":
+        return cls in ("ok", "no_rdap")
+    if source == "github_api":
+        name = extracted.get("full_name")
+        return isinstance(name, str) and bool(name)
+    return isinstance(cls, str) and bool(cls)
 
 
 def decide(item, sources, *, now, template_version, health=None, finding_id=None,
@@ -354,7 +376,9 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
                 "source_date": src.get("source_date") or now,
             }
         checked.append(entry)
-        extracted = src.get("extracted") or {}
+        extracted = src.get("extracted")
+        if not isinstance(extracted, dict):
+            extracted = {}
         date = _date10(src.get("source_date") or extracted.get("date") or now)
 
         if status == "not_configured":
