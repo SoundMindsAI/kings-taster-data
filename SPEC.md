@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.5, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.6, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -377,7 +377,9 @@ keys.json is published. That file is not published yet.
   Anything else is refused (the bot will treat the list as unverifiable and answer Unknown).
 - **Until the first signed file is published.** `config/root_pins` holds no public keys yet. Daily files still
   verify against `config/allowed_signers` as in §7.3, so a release can still be verified without a `keys.json`.
-  If a `keys.json` is present, it is refused until the master public-key pins are published.
+  If a `keys.json` is present, it is refused until the master public-key pins are published. Once those pins
+  are published, a release with no `keys.json` is refused (the bot will treat the list as unverifiable and
+  answer Unknown).
 
 ### 7.4 Rollback, pause and revocation
 
@@ -529,3 +531,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 | 1.3 | 2026-11-26 | Adds the planned sharded list (§6.5): shards by ecosystem or type and hash prefix, a signed manifest, per-shard caching and caps, and what a shard download shows GitHub. Clarifies that a failing checker switches the bot to checklist mode rather than answering Unknown, and that the size caps are planned. |
 | 1.4 | 2026-11-26 | Builds the sharded list (§6.5): `manifest.json` (signed) and 518 shards, npm and PyPI split by the first byte of SHA-256(`match_key`), one shard each for KEV and the other types, with 5 MB caps enforced by the build and validator. Adds the first-run connectivity check (§4D) and its pre-send rule (§10.1), with conformance cases. States the signature-file size limit and the allowed-signers option rules (§7.3). |
 | 1.5 | 2026-11-27 | Adds §7.3A: the format and verifier for a signed `keys.json` that will name the current and next daily signing keys, with a 90-day validity window, `revoked_keys`, and signature namespace `kings-taster-keys`. The first signed `keys.json` and the master public-key pins are not published yet. Until they are, daily files still verify against `config/allowed_signers`, and a `keys.json` that is present is refused. A `keys.json` must be 64 KiB or smaller (65,536 bytes), and its `generated_at` may not be more than 5 minutes ahead. |
+| 1.6 | 2026-11-27 | Once the master public-key pins are published, a release with no `keys.json` is refused (the bot will treat the list as unverifiable and answer Unknown). Until the pins are published, a release can still be verified without a `keys.json`, and a `keys.json` that is present is refused.

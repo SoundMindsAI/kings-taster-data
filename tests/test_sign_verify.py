@@ -418,3 +418,25 @@ class TestKeysReleaseHook(VerifyBase):
         with self.assertRaisesRegex(KV.VerifyError, "rollback"):
             self.v(b, state=state, now=later)
 
+    def test_pins_plus_missing_keys_json_refused(self):
+        out = self.release("pins-missing-keys")
+        with self.assertRaisesRegex(KV.VerifyError, "keys.json is missing"):
+            self.v(out)
+
+    def test_pins_plus_valid_keys_json_ok(self):
+        out = self.release("pins-valid-keys")
+        self.put_keys(out, self.keys_doc(_pub(self.cur), now=T0, next_pub=_pub(self.nxt)))
+        self.assertEqual(self.v(out)[0], 0)
+
+
+@unittest.skipUnless(HAVE_SSH, "ssh-keygen not installed")
+class TestMissingKeysJsonWithoutPins(VerifyBase):
+    """With unpublished pins, a release can still verify without keys.json."""
+
+    def test_no_pins_plus_missing_keys_json_still_verifies(self):
+        from kt import keys as K
+        self.assertEqual(K.load_root_pins(K.DEFAULT_PINS), [])
+        out = self.release("no-pins-no-keys")
+        self.assertFalse(os.path.exists(os.path.join(out, "keys.json")))
+        self.assertEqual(self.v(out)[0], 0)
+

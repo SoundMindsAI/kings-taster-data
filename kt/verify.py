@@ -127,9 +127,16 @@ def verify_release(d, allowed, state=None, update_state=False, template_version=
     daily_allowed = allowed
     tmp_allowed = None
     try:
+        from . import keys as K
+        try:
+            pins = K.load_root_pins(K.DEFAULT_PINS)
+        except (K.KeysError, OSError, ValueError) as e:
+            raise VerifyError("root_pins: %s" % e)
         keys_path = os.path.join(d, "keys.json")
-        if os.path.exists(keys_path) or os.path.exists(keys_path + ".sig"):
-            from . import keys as K
+        keys_present = os.path.exists(keys_path) or os.path.exists(keys_path + ".sig")
+        if pins and not keys_present:
+            raise VerifyError("keys.json is missing")
+        if keys_present:
             prev_at, prev_sha = _keys_state(state)
             try:
                 keys_doc, keys_raw, _ = K.verify_keys_file(
