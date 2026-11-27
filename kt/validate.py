@@ -1,4 +1,5 @@
-"""Validators for the release files: iocs.json, latest.json, stats.json, conformance.json.
+"""Validators for the release files: iocs.json, latest.json, stats.json, conformance.json, manifest.json and
+the shard-*.json files it lists.
 
 Usage: python3 -m kt.validate <dir> [--previous <dir>]
 Checks schemas, cross-field rules, latest.json hashes, and (with --previous) monotonicity.
@@ -11,16 +12,22 @@ import re
 import sys
 
 from . import jsonschema_lite
+from . import connectivity as CONN
+from . import shards as SH
 from .common import (canonical_json, loads_strict, match_key, normalize_package, parse_time, read_json,
                      sha256_bytes, utc_now, ECO_PREFIX)
 from .finding import RESULT_RANK, UNKNOWN_REASONS, CAUTION_REASONS, BLOCK_REASONS
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-SCHEMAS = {name: os.path.join(ROOT, "schema", name + ".schema.json") for name in ("iocs", "latest", "stats")}
+SCHEMAS = {name: os.path.join(ROOT, "schema", name + ".schema.json") for name in ("iocs", "latest", "stats", "manifest")}
 ALL_REASONS = UNKNOWN_REASONS | CAUTION_REASONS | BLOCK_REASONS | {"checker_failed"}
 REQUIRED_SOURCE_IDS = {"cisa-kev", "osv-npm", "osv-pypi", "kings-taster-canary"}
 CANARY_TYPES = {"package:npm", "package:pypi", "domain", "url", "ip", "hash", "repo_owner", "cve"}
-RELEASE_FILES = ("iocs.json", "conformance.json", "stats.json")
+RELEASE_FILES = ("iocs.json", "conformance.json", "stats.json", "manifest.json")
+# Signed files (latest.json + RELEASE_FILES, each with a .sig) plus LICENSES.md and Apache-2.0.txt.
+RELEASE_ASSET_OVERHEAD = 2 * (1 + len(RELEASE_FILES)) + 2
+MAX_RELEASE_ASSETS = 1000  # GitHub's per-release asset limit
+MAX_MANIFEST_BYTES = 5 * 1024 * 1024
 
 
 def _schema(name):
@@ -111,6 +118,13 @@ def validate_iocs(doc, fast_entries=False):
     return errors
 
 
+def validate_manifest(doc):
+    errors = jsonschema_lite.validate(doc, _schema("manifest"))
+    if not errors and doc["counts"]["shards"] + RELEASE_ASSET_OVERHEAD > MAX_RELEASE_ASSETS:
+        errors.append("manifest: too many shards for one release")
+    return errors
+
+
 def validate_stats(doc):
     return jsonschema_lite.validate(doc, _schema("stats"))
 
@@ -120,7 +134,7 @@ def validate_conformance(doc):
     if doc.get("file_type") != "conformance" or doc.get("schema_version") != 1:
         errors.append("conformance: wrong file_type/schema_version")
     allowed_top = {"file_type", "schema_version", "generated_at", "tag", "comment", "global_expectations", "cases",
-                   "canonicalization_vectors"}
+                   "canonicalization_vectors", "connectivity"}
     if set(doc) - allowed_top:
         errors.append("conformance: unexpected top-level fields")
     cases = doc.get("cases") or []
@@ -156,6 +170,59 @@ def validate_conformance(doc):
     vec = (doc.get("canonicalization_vectors") or {}).get("vectors") or []
     if len(vec) < 30:
         errors.append("conformance: canonicalization vectors missing")
+    errors += validate_connectivity(doc.get("connectivity"))
+    return errors
+
+
+CONN_FIXED = {"template": "KT {version} is live and checking",
+              "pattern": "^KT \\d{1,3}\\.\\d{1,3}\\.\\d{1,3} is live and checking\\Z",
+              "offer": CONN.OFFER, "approval_notice": CONN.APPROVAL_NOTICE, "read_only_ok": CONN.READ_ONLY_OK,
+              "default_answer": "no", "state_key": CONN.STATE_KEY, "counts_toward_report_caps": True,
+              "counts_as_threat_report": False, "override_allowed": False}
+CONN_OUTCOMES = ("offered", "draft_shown", "asked_ok_to_send", "posted", "read_only_check", "marks_done",
+                 "counts_as_report")
+
+
+def validate_connectivity(c):
+    """SPEC.md §4D/§10.1: the connectivity cases must carry the fixed texts and agree with kt/connectivity.py."""
+    if not isinstance(c, dict):
+        return ["conformance: connectivity cases missing"]
+    errors = []
+    if set(c) != set(CONN_FIXED) | {"comment", "draft_cases", "flow_cases"}:
+        errors.append("connectivity: unexpected or missing fields")
+    for k, v in CONN_FIXED.items():
+        if c.get(k) != v:
+            errors.append("connectivity: %s must be the fixed value" % k)
+    ids = set()
+    drafts = c.get("draft_cases") or []
+    flows = c.get("flow_cases") or []
+    if sum(1 for d in drafts if d.get("expected") == "allow") < 1 or sum(1 for d in drafts if d.get("expected") == "refuse") < 8:
+        errors.append("connectivity: need at least 1 allowed and 8 refused drafts")
+    for d in drafts:
+        cid = d.get("id")
+        if set(d) != {"id", "running_version", "draft", "expected"} or not isinstance(cid, str) \
+                or not re.fullmatch(r"conn-[a-z0-9-]{3,55}", cid) or cid in ids:
+            errors.append("connectivity: bad draft case"); continue
+        ids.add(cid)
+        if d["expected"] not in ("allow", "refuse") or \
+                CONN.draft_allowed(d["draft"], d["running_version"]) != (d["expected"] == "allow"):
+            errors.append("connectivity: draft case %s disagrees with the rule" % cid)
+    triggers = set()
+    for f in flows:
+        cid = f.get("id")
+        keys = {"id", "trigger", "already_done", "offer_answer", "send_answer", "post_ok", "reports_left", "expected"}
+        if set(f) != keys or not isinstance(cid, str) or not re.fullmatch(r"conn-[a-z0-9-]{3,55}", cid) or cid in ids \
+                or f["trigger"] not in CONN.TRIGGERS or f["offer_answer"] not in CONN.ANSWERS \
+                or f["send_answer"] not in CONN.ANSWERS or set(f["expected"]) != set(CONN_OUTCOMES):
+            errors.append("connectivity: bad flow case"); continue
+        ids.add(cid)
+        triggers.add(f["trigger"])
+        got = CONN.flow(f["trigger"], f["already_done"], f["offer_answer"], f["send_answer"], f["post_ok"],
+                        f["reports_left"])
+        if got != f["expected"]:
+            errors.append("connectivity: flow case %s disagrees with the rule" % cid)
+    if triggers != set(CONN.TRIGGERS):
+        errors.append("connectivity: flow cases must cover every trigger")
     return errors
 
 
@@ -233,13 +300,19 @@ def validate_release_dir(d, previous_dir=None, fast_entries=True, now=None):
             errors.append("%s: not a JSON object" % name)
     if errors:
         return errors
+    if len(raws["manifest.json"]) > MAX_MANIFEST_BYTES:
+        return errors + ["manifest.json: over the 5 MB cap"]
     for name, ft in (("iocs.json", "iocs"), ("conformance.json", "conformance"), ("stats.json", "stats"),
-                     ("latest.json", "latest")):
+                     ("manifest.json", "manifest"), ("latest.json", "latest")):
         if docs[name].get("file_type") != ft:
             errors.append("%s: file_type must be %s" % (name, ft))
     errors += ["iocs.json: " + e for e in validate_iocs(docs["iocs.json"], fast_entries)]
     errors += ["stats.json: " + e for e in validate_stats(docs["stats.json"])]
     errors += ["conformance.json: " + e for e in validate_conformance(docs["conformance.json"])]
+    m_errs = validate_manifest(docs["manifest.json"])
+    errors += ["manifest.json: " + e for e in m_errs]
+    if not m_errs and not errors:
+        errors += SH.validate_shards(d, docs["manifest.json"], iocs=docs["iocs.json"], require_all=True)
     errors += validate_latest(docs["latest.json"], d, raw=raws["latest.json"])
     if not errors:
         errors += check_not_future(docs["latest.json"]["generated_at"], now)

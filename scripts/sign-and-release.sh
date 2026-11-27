@@ -10,6 +10,8 @@
 # Steps: get the unsigned artifact -> validate -> check against the live release (signature +
 # monotonic generated_at + revocations) -> circuit breaker -> sign with ssh-keygen -Y sign ->
 # verify our own signatures -> create the dated release -> update the kt-latest pointer.
+# Shards (shard-*.json) are not signed one by one: each is pinned by its SHA-256 in the signed manifest.json,
+# which keeps a release under GitHub's 1,000-asset limit.
 # --dry-run stops after verification and creates nothing on GitHub.
 set -euo pipefail
 umask 077
@@ -20,7 +22,7 @@ NS="kings-taster"
 ARTIFACT="kt-release-unsigned"
 POINTER_TAG="kt-latest"
 GH="${KT_GH:-gh}"
-FILES=(latest.json iocs.json conformance.json stats.json)
+FILES=(latest.json iocs.json conformance.json stats.json manifest.json)
 
 RUN_ID="" FROM_DIR="" KEY="${KT_SIGNING_KEY_PATH:-}" ACCEPT_BREAKER=0 BOOTSTRAP=0 DRY_RUN=0
 die() { echo "sign-and-release: REFUSED: $*" >&2; exit 1; }
@@ -83,10 +85,16 @@ else
     [ -f "$FROM_DIR/$f" ] || die "missing $f in --from-dir"
     cp "$FROM_DIR/$f" "$ART/$f"
   done
+  for f in "$FROM_DIR"/shard-*.json; do
+    [ -f "$f" ] || continue
+    cp "$f" "$ART/"
+  done
 fi
 for f in "${FILES[@]}" build-report.json; do [ -f "$ART/$f" ] || die "artifact is missing $f"; done
 for f in "$ART"/*; do
-  case "$(basename "$f")" in latest.json|iocs.json|conformance.json|stats.json|build-report.json) ;; *) die "unexpected file in artifact" ;; esac
+  b="$(basename "$f")"
+  case "$b" in latest.json|iocs.json|conformance.json|stats.json|manifest.json|build-report.json) continue ;; esac
+  [[ "$b" =~ ^shard-(npm|pypi|kev|domain|url|ip|hash|repo_owner)(-[0-9a-f]{2})?\.json$ ]] || die "unexpected file in artifact"
 done
 
 # 2. Validate the unsigned files.
@@ -102,7 +110,7 @@ if [ "$DRY_RUN" -eq 0 ] || [ -n "$RUN_ID" ]; then
     "$GH" release download "$POINTER_TAG" --repo "$REPO" --pattern 'latest.json' --pattern 'latest.json.sig' --dir "$PREV"
     PTAG="$("${PY[@]}" -c 'import json,sys;print(json.load(open(sys.argv[1]))["tag"])' "$PREV/latest.json")"
     [[ "$PTAG" =~ ^kt-[0-9]{8}T[0-9]{6}Z$ ]] || die "live pointer has a bad tag"
-    for f in iocs.json conformance.json stats.json; do
+    for f in iocs.json conformance.json stats.json manifest.json; do
       "$GH" release download "$PTAG" --repo "$REPO" --pattern "$f" --pattern "$f.sig" --dir "$PREV"
     done
     "${PY[@]}" -m kt.verify "$PREV" --allowed-signers "$ALLOWED" --max-age-hours 87600 "${NOW_ARGS[@]}" >/dev/null \
@@ -132,12 +140,13 @@ for f in "${FILES[@]}"; do
   [ ! -e "$ART/$f.sig" ] || die "unexpected existing signature"
   ssh-keygen -Y sign -q -f "$KEY" -n "$NS" "$ART/$f" </dev/null || die "signing failed"
 done
-"${PY[@]}" -m kt.verify "$ART" --allowed-signers "$ALLOWED" --max-age-hours 87600 "${NOW_ARGS[@]}" >/dev/null || [ $? -eq 3 ] \
-  || die "our own signatures did not verify"
+"${PY[@]}" -m kt.verify "$ART" --allowed-signers "$ALLOWED" --max-age-hours 87600 --require-shards "${NOW_ARGS[@]}" >/dev/null || [ $? -eq 3 ] \
+  || die "our own signatures or shards did not verify"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   OUT="${KT_DRY_RUN_OUT:-}"
   if [ -n "$OUT" ]; then mkdir -p "$OUT"; cp "$ART"/*.json "$ART"/*.sig "$OUT"/; fi
+  echo "sign-and-release: $(ls "$ART"/shard-*.json | wc -l | tr -d ' ') shards pinned by manifest.json"
   echo "sign-and-release: DRY RUN OK, $TAG signed and verified, nothing published"
   exit 0
 fi
@@ -157,6 +166,8 @@ OSSF_LICENSE="OpenSSF-Malicious-Packages-Apache-2.0.txt"
 cp "$TPL_DIR/$OSSF_LICENSE" "$ART/Apache-2.0.txt"
 assets=()
 for f in "${FILES[@]}"; do assets+=("$ART/$f" "$ART/$f.sig"); done
+for f in "$ART"/shard-*.json; do assets+=("$f"); done
+[ "${#assets[@]}" -le 998 ] || die "too many release assets for one GitHub release"
 "$GH" release create "$TAG" "${assets[@]}" "$ART/LICENSES.md" "$ART/Apache-2.0.txt" \
   --repo "$REPO" --target main --title "$TAG" --notes-file "$NOTES" --latest=false
 PSTATE="$(release_state "$POINTER_TAG")" || die "could not check the pointer release (gh failed) after creating $TAG; move $POINTER_TAG by hand"

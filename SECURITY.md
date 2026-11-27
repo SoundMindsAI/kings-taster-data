@@ -32,7 +32,7 @@ There is no bug bounty.
 
 ## Verifying our files
 
-Once the first release is published, every release file has a detached OpenSSH signature (Ed25519, namespace `kings-taster`). The public keys are
+Once the first release is published, every release file except the shards has a detached OpenSSH signature (Ed25519, namespace `kings-taster`). Each shard's SHA-256 is listed in the signed `manifest.json`, so a changed shard is caught. The public keys are
 in [config/allowed_signers](config/allowed_signers). The current signing key's fingerprint is:
 
 ```
@@ -45,5 +45,5 @@ To verify a release, see "Verify a release" in the [README](README.md).
 
 | Part | Supported version |
 |---|---|
-| `SPEC.md` | 1.3 |
+| `SPEC.md` | 1.4 |
 | List format (`schema_version`) | 1 |

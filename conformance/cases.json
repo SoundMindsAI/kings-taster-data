@@ -1353,5 +1353,310 @@
     "expected": "http://host.com/twoslashes?more//slashes"
    }
   ]
+ },
+ "connectivity": {
+  "comment": "First-run connectivity reply (SPEC.md §4D, §10.1). draft_cases: the pre-send block allows only the exact template with the running version. flow_cases: one attempt each; expected is the full outcome. A yes to send counts as a report even if posting then fails.",
+  "template": "KT {version} is live and checking",
+  "pattern": "^KT \\d{1,3}\\.\\d{1,3}\\.\\d{1,3} is live and checking\\Z",
+  "offer": "Want to post a one-time reply to the King's Taster X thread to confirm your setup works?",
+  "approval_notice": "This posts publicly from your X account, so anyone can see that this account uses King's Taster.",
+  "read_only_ok": "X connection works (read-only check)",
+  "default_answer": "no",
+  "state_key": "connectivity_done",
+  "counts_toward_report_caps": true,
+  "counts_as_threat_report": false,
+  "override_allowed": false,
+  "draft_cases": [
+   {
+    "id": "conn-draft-exact",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and checking",
+    "expected": "allow"
+   },
+   {
+    "id": "conn-draft-other-version",
+    "running_version": "1.4.0",
+    "draft": "KT 1.3.9 is live and checking",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-extra-word",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and checking now",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-prefix-word",
+    "running_version": "1.4.0",
+    "draft": "Yes KT 1.4.0 is live and checking",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-handle",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and checking @someone",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-trailing-newline",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and checking\n",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-double-space",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and  checking",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-lowercase",
+    "running_version": "1.4.0",
+    "draft": "kt 1.4.0 is live and checking",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-punctuation",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and checking!",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-link",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and checking hxxps://example[.]com",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-no-version",
+    "running_version": "1.4.0",
+    "draft": "KT is live and checking",
+    "expected": "refuse"
+   },
+   {
+    "id": "conn-draft-ip",
+    "running_version": "1.4.0",
+    "draft": "KT 1.4.0 is live and checking 192.0.2.1",
+    "expected": "refuse"
+   }
+  ],
+  "flow_cases": [
+   {
+    "id": "conn-flow-first-run-yes",
+    "trigger": "first_run",
+    "already_done": false,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": true,
+     "draft_shown": true,
+     "asked_ok_to_send": true,
+     "posted": true,
+     "read_only_check": false,
+     "marks_done": true,
+     "counts_as_report": true
+    }
+   },
+   {
+    "id": "conn-flow-first-run-decline",
+    "trigger": "first_run",
+    "already_done": false,
+    "offer_answer": "no",
+    "send_answer": "none",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": true,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": true,
+     "marks_done": true,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-first-run-not-now",
+    "trigger": "first_run",
+    "already_done": false,
+    "offer_answer": "not_now",
+    "send_answer": "none",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": true,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": true,
+     "marks_done": true,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-no-answer-is-no",
+    "trigger": "first_run",
+    "already_done": false,
+    "offer_answer": "none",
+    "send_answer": "none",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": true,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": true,
+     "marks_done": true,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-send-declined",
+    "trigger": "first_run",
+    "already_done": false,
+    "offer_answer": "yes",
+    "send_answer": "no",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": true,
+     "draft_shown": true,
+     "asked_ok_to_send": true,
+     "posted": false,
+     "read_only_check": true,
+     "marks_done": true,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-post-fails",
+    "trigger": "first_run",
+    "already_done": false,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": false,
+    "reports_left": 1,
+    "expected": {
+     "offered": true,
+     "draft_shown": true,
+     "asked_ok_to_send": true,
+     "posted": false,
+     "read_only_check": true,
+     "marks_done": true,
+     "counts_as_report": true
+    }
+   },
+   {
+    "id": "conn-flow-not-offered-twice",
+    "trigger": "first_run",
+    "already_done": true,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": false,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": false,
+     "marks_done": false,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-user-asks-again",
+    "trigger": "user_request",
+    "already_done": true,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": true,
+     "draft_shown": true,
+     "asked_ok_to_send": true,
+     "posted": true,
+     "read_only_check": false,
+     "marks_done": true,
+     "counts_as_report": true
+    }
+   },
+   {
+    "id": "conn-flow-over-report-cap",
+    "trigger": "user_request",
+    "already_done": true,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": true,
+    "reports_left": 0,
+    "expected": {
+     "offered": true,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": false,
+     "marks_done": true,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-routine-never",
+    "trigger": "routine",
+    "already_done": false,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": false,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": false,
+     "marks_done": false,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-health-check-never",
+    "trigger": "health_check",
+    "already_done": false,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": false,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": false,
+     "marks_done": false,
+     "counts_as_report": false
+    }
+   },
+   {
+    "id": "conn-flow-bot-message-never",
+    "trigger": "bot_message",
+    "already_done": false,
+    "offer_answer": "yes",
+    "send_answer": "yes",
+    "post_ok": true,
+    "reports_left": 1,
+    "expected": {
+     "offered": false,
+     "draft_shown": false,
+     "asked_ok_to_send": false,
+     "posted": false,
+     "read_only_check": false,
+     "marks_done": false,
+     "counts_as_report": false
+    }
+   }
+  ]
  }
 }
