@@ -32,6 +32,10 @@ LIST_CASES = [
     ("L2 space", "https://github.com /x" + LP, False),
     ("L2 CR", "https://github.com\r" + LP, False),
     ("L2 LF", "https://github.com\n" + LP, False),
+    ("L-R2-1 tab in path", "https://github.com/SoundMindsAI/kings-taster-data/releases/down\tload/kt-latest/latest.json", False),
+    ("L-R2-1 CR in path", "https://github.com/SoundMindsAI/kings-taster-data/releases/down\rload/kt-latest/latest.json", False),
+    ("L-R2-1 LF in path", "https://github.com/SoundMindsAI/kings-taster-data/releases/down\nload/kt-latest/latest.json", False),
+    ("L-R2-1 DEL in path", "https://github.com/SoundMindsAI/kings-taster-data/releases/down\x7fload/kt-latest/latest.json", False),
     ("leading space", " " + OFFICIAL, False),
     ("dotdot", "https://github.com/SoundMindsAI/kings-taster-data/releases/download/../../evil/x", False),
 ]

@@ -49,7 +49,9 @@ def split_url(url):
         raise ValueError("unparsable") from None
     authority = _raw_authority(url)
     _check_authority(authority)
-    if url[0] <= " " or url[-1] <= " ":  # urlsplit trims these, so it would hide them
+    # urlsplit strips tab/CR/LF anywhere and trims leading/trailing space, which
+    # would hide them from the path check. DEL (0x7f) is also refused.
+    if any(c <= " " or c == "\x7f" for c in url):
         raise ValueError("bad authority")
     if parts.netloc != authority:
         raise ValueError("bad authority")
