@@ -1,6 +1,7 @@
 """Daily pipeline health check (SPEC.md §7.5). All checks are local; no network."""
 import datetime as dt
 import io
+import json
 import contextlib
 import os
 import shutil
@@ -296,6 +297,76 @@ class TestHealthPassAndHolds(HealthCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(H.main([out, "--now", T0_ISO, "--out", os.path.join(self.tmp, "h.json"),
                                      "--root", self.root]), H.EXIT_FAIL)
+
+    def test_unflagged_canary_id_is_fail_even_without_shards(self):
+        # N8: a real entry with a canary: id but no canary flag must fail health
+        # (watchdog shape: no shards required), as validate already does.
+        out = self.build()
+        iocs_path = os.path.join(out, "iocs.json")
+        iocs = load(iocs_path)
+        extra = next(dict(e) for e in iocs["entries"] if not e["canary"])
+        extra["id"] = "canary:sneaky"
+        extra["canary"] = False
+        iocs["entries"].append(extra)
+        write_canonical(iocs_path, iocs)
+        report = self.check(out, require_shards=False)
+        self.assertEqual(self._canary_check(report)["status"], "fail", report["checks"])
+        self.assertTrue(any(x.startswith("canaries:") for x in report["failed"]), report["failed"])
+
+    def test_swapped_domain_and_ip_canary_keys_fail_health_and_validate(self):
+        # N9: the key list alone is a multiset; keys must be bound to their types.
+        from kt import validate as V
+        out = self.build()
+        iocs_path = os.path.join(out, "iocs.json")
+        iocs = load(iocs_path)
+        dom = next(e for e in iocs["entries"] if e["canary"] and e["type"] == "domain")
+        ip = next(e for e in iocs["entries"] if e["canary"] and e["type"] == "ip")
+        dom["match_key"], ip["match_key"] = ip["match_key"], dom["match_key"]
+        write_canonical(iocs_path, iocs)
+        report = self.check(out)
+        self.assertEqual(self._canary_check(report)["status"], "fail", report["checks"])
+        errs = V.validate_iocs(iocs, root=self.root)
+        self.assertTrue(any("canary match_keys differ" in e for e in errs), errs)
+
+    def test_non_string_canary_value_returns_none(self):
+        # N7: AttributeError from match_key must not escape list_canary_keys.
+        from kt import validate as V
+        out = self.build()
+        path = os.path.join(self.root, "config", "canaries.json")
+        doc = load(path)
+        doc["list"][2]["value"] = 5
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        self.assertIsNone(V.list_canary_keys(self.root))
+        report = self.check(out)
+        self.assertEqual(self._canary_check(report)["status"], "fail", report["checks"])
+
+    def test_alert_after_hours_must_be_a_sane_positive_int(self):
+        # N13: a huge value must not let an old artifact pass the pre-sign date check.
+        out = self.build()
+        stale = T0 + dt.timedelta(days=30)
+        for bad in (10 ** 30, 73, 0, -1, "26", 26.0, True, None):
+            with self.subTest(bad=bad):
+                report = self.check(out, now=stale, pre_sign=True, limits={"alert_after_hours": bad})
+                self.assertEqual(report["status"], "fail", report["checks"])
+                dates = next(c for c in report["checks"] if c["name"] == "dates")
+                self.assertEqual(dates["status"], "fail")
+        ok_now = T0 + dt.timedelta(hours=70)
+        report = self.check(out, now=ok_now, pre_sign=True, limits={"alert_after_hours": 72})
+        dates = next(c for c in report["checks"] if c["name"] == "dates")
+        self.assertEqual(dates["status"], "ok", dates)
+
+    def test_abbreviated_flags_are_refused_and_full_flags_work(self):
+        out = self.build()
+        h = os.path.join(self.tmp, "h.json")
+        for flag in (["--o", h], ["--r", self.root], ["--allowed", "x"], ["--prev", out], ["--pre"]):
+            with self.subTest(flag=flag), contextlib.redirect_stderr(io.StringIO()):
+                # main() maps argparse's status 2 to EXIT_FAIL, not a hold.
+                self.assertEqual(H.main([out, "--now", T0_ISO] + flag), H.EXIT_FAIL)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(H.main([out, "--now", T0_ISO, "--out", h, "--root", self.root,
+                                     "--pre-sign"]), H.EXIT_OK)
+            self.assertEqual(H.main(["--help"]), H.EXIT_OK)
 
     def test_crash_report_keeps_parsed_flags(self):
         # N6: a crash after parse_args records the flags that were actually given.
