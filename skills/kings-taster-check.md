@@ -45,9 +45,10 @@ import json,re,sys
 ID=re.compile(r"^(MAL|GHSA|PYSEC|CVE|OSV)-[A-Za-z0-9._-]{1,80}$"); ECO=re.compile(r"^(npm|PyPI)$"); NAME=re.compile(r"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$"); VER=re.compile(r"^[A-Za-z0-9._+-]{1,64}$"); ISO=re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}")
 def bad():
     print("class injection_seen"); sys.exit(0)
-doc=json.load(open(sys.argv[1], encoding="utf-8"))
-vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else [doc]
-if not isinstance(vulns, list) or len(vulns)>50: bad()
+try: doc=json.load(open(sys.argv[1], encoding="utf-8")); s=(open(sys.argv[2], encoding="utf-8").read().splitlines()+["",""])[:2] if len(sys.argv)>2 else None
+except Exception: bad()
+ok=s is not None and s[0].strip()=="200" and s[1].strip()=="https://api.osv.dev/v1/query"; vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else ([] if doc=={} and s is not None and ok else None)
+if not ok or not isinstance(vulns, list) or len(vulns)>50 or (isinstance(doc, dict) and "next_page_token" in doc): bad()
 rows=[]
 for v in vulns:
     if not isinstance(v, dict): bad()
@@ -72,7 +73,7 @@ for v in vulns:
 print("osv_count %d" % len(rows))
 for i,kind,d,fx in rows[:7]: print("%s %s %s %s" % (i, kind, d, fx))
 print("class %s" % ("malicious" if any(k=="malicious" for _,k,_,_ in rows) else ("vulnerable" if rows else "clean")))
-' "$RAW"
+' "$RAW" "$CODE"
 
 ### extract-github
 python3 -I -c '
