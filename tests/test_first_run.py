@@ -49,12 +49,19 @@ class TestSkillTexts(unittest.TestCase):
         self.assertIn(CONN.READ_ONLY_OK, fixed)
         self.assertIn("opt-in", body)
         self.assertIn("default is no", body)
+        self.assertIn("(default no)", body)
         self.assertIn("OK to send?", body)
         self.assertIn("no override", body)
         self.assertIn("never counted as a threat report", body)
         self.assertIn("3 a day, 10 a week, 1 per item per week", body)
         self.assertIn("connectivity_done", body)
         self.assertIn("kings-taster-routing", body)
+        self.assertIn("skills/kings-taster-build.md", body)
+        self.assertIn("is present", body)
+        for needle in ("before any check", "optional checker", "load it only on yes",
+                       "The user may ask for it again", "the same steps"):
+            self.assertIn(needle, body, needle)
+        self.assertLess(body.index("connectivity check"), body.index("skills/kings-taster-build.md"))
         # Must not be triggerable as a routine.
         self.assertIn("Never load from a routine", body)
 

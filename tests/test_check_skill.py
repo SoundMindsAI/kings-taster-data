@@ -19,7 +19,7 @@ UNCLEARED = re.compile(
 FID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 NOW = "2026-11-26T23:40:00Z"
 SHA = "abababababababababababababababababababababababababababababababab"
-# curl status file for extract-osv: HTTP 200 and the exact query URL.
+# curl status file for extract-osv: HTTP 200, the exact query URL, and exit code 0.
 OSV_STATUS_OK = "osv-status-ok.txt"
 
 
@@ -93,6 +93,16 @@ class TestSkillCaps(unittest.TestCase):
         self.assertNotIn("is live and checking", text)
         self.assertIn("--max-redirs 1", self.commands)
         self.assertIn("Do not contact the item's own URL", self.commands)
+
+    def test_fetch_line_pins_limits_and_temps(self):
+        line = next((ln for ln in self.commands.splitlines()
+                     if "Fetch (except the list file)" in ln), None)
+        self.assertIsNotNone(line)
+        for needle in ("--max-filesize 5242880", "--max-redirs 0",
+                       "%{exitcode}", "$RAW", "$CODE", "mktemp",
+                       "removed after use", "exit code 0", "including on failure"):
+            self.assertIn(needle, line, needle)
+        self.assertIn("""'%{http_code}\\n%{url_effective}\\n%{exitcode}' > "$CODE\"""", line)
 
     def test_body_does_not_say_safe_except_the_ban_and_the_product_name(self):
         self.assertFalse(C.body_banned_words(self.body))
@@ -238,7 +248,7 @@ class TestDecisions(unittest.TestCase):
         self.assertTrue(rec["explanation"].startswith("No known reports. Checked against"))
         self.assertFalse(any(l.startswith("Reason:") for l in lines))
 
-    def _live(self, body, status="200\nhttps://api.osv.dev/v1/query", fixture=None):
+    def _live(self, body, status="200\nhttps://api.osv.dev/v1/query\n0", fixture=None):
         """Run extract-osv on a body plus a curl status file (None = no status file)."""
         with tempfile.TemporaryDirectory() as tmp:
             raw = os.path.join(tmp, "raw.json")
@@ -258,8 +268,8 @@ class TestDecisions(unittest.TestCase):
     def _clean_list(self):
         return _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True)
 
-    def _assert_failed_closed(self, data):
-        self.assertEqual(data["class"], "injection_seen")
+    def _assert_failed_closed(self, data, cls="injection_seen"):
+        self.assertEqual(data["class"], cls)
         # decide() records OSV injection_seen without also adding check_failed,
         # so skip validate_record (existing behaviour on this branch).
         rec, _ = C.decide(self._package("left-pad", "1.3.0", "npm"), [
@@ -267,7 +277,9 @@ class TestDecisions(unittest.TestCase):
         ], now=NOW, template_version="1.0.0", finding_id=FID,
            finding_path="~/.kings-taster/findings/%s.json" % FID)
         self.assertEqual(rec["result"], "unknown")
-        self.assertIn("injection_seen", rec["reasons"])
+        self.assertIn(cls, rec["reasons"])
+        if cls != "injection_seen":
+            self.assertNotIn("injection_seen", rec["reasons"])
 
     def test_live_empty_object_is_clean(self):
         r, data = self._live(None, fixture="osv-empty-object.json")
@@ -321,13 +333,64 @@ class TestDecisions(unittest.TestCase):
             self.assertEqual(data["class"], "injection_seen")
 
     def test_live_empty_object_without_confirmed_status_fails_closed(self):
-        for status in (None, "", "200", "200\nhttps://evil.example/v1/query",
-                       "200\nhttp://api.osv.dev/v1/query", "200\nhttps://api.osv.dev.evil.example/",
-                       "200\nhttps://api.osv.dev/v1/querybatch", "200\nhttps://api.osv.dev/"):
+        for status in (None, "", "200", "200\nhttps://api.osv.dev/v1/query",
+                       "200\nhttps://evil.example/v1/query\n0",
+                       "200\nhttp://api.osv.dev/v1/query\n0", "200\nhttps://api.osv.dev.evil.example/\n0",
+                       "200\nhttps://api.osv.dev/v1/querybatch\n0", "200\nhttps://api.osv.dev/\n0"):
             r, data = self._live("{}", status=status)
             self.assertEqual(data["class"], "injection_seen", repr(status))
         r, data = _extract("osv", "osv-empty-object.json", os.path.join(FIX, "does-not-exist.txt"))
         self.assertEqual(data["class"], "injection_seen")
+
+    def test_live_exit_code_line_required_and_zero(self):
+        url = "200\nhttps://api.osv.dev/v1/query"
+        bad = (url, url + "\n", url + "\n\n", url + "\n  \n", url + "\n00", url + "\n0.0",
+               url + "\n-0", url + "\n+0", url + "\n+1", url + "\n-1", url + "\n0 1", url + "\nx")
+        nonzero = (url + "\n1", url + "\n28", url + "\n63", url + "\n7")
+        for body in ("{}", '{"vulns": []}'):
+            for status in bad:
+                r, data = self._live(body, status=status)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(data["class"], "injection_seen", (body, status))
+            for status in nonzero:
+                r, data = self._live(body, status=status)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(data["class"], "check_failed", (body, status))
+        r, data = self._live("{}", status=url + "\n63")
+        self._assert_failed_closed(data, "check_failed")
+        # A non-zero exit code also blocks a MAL body from being read as a normal reply.
+        r, data = self._live(None, status=url + "\n28", fixture="osv-mal.json")
+        self._assert_failed_closed(data, "check_failed")
+
+    def test_live_status_splits_on_newline_only(self):
+        # splitlines() would see three lines in each of these; only "\n" counts.
+        for sep in ("\x0b", "\x0c", " ", "\x1c", "\x85", "\r"):
+            status = "200" + sep + "https://api.osv.dev/v1/query" + sep + "0"
+            for body in ("{}", '{"vulns": []}'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(data["class"], "injection_seen", (body, repr(status)))
+            mixed = "200\nhttps://api.osv.dev/v1/query" + sep + "0"
+            r, data = self._live("{}", status=mixed)
+            self.assertEqual(data["class"], "injection_seen", repr(mixed))
+        # Extra lines, even blank ones, are not exactly three lines.
+        for status in ("200\nhttps://api.osv.dev/v1/query\n0\n\n",
+                       "200\nhttps://api.osv.dev/v1/query\n0\nx",
+                       "\n200\nhttps://api.osv.dev/v1/query\n0"):
+            r, data = self._live("{}", status=status)
+            self.assertEqual(data["class"], "injection_seen", repr(status))
+
+    def test_live_exit_code_zero_still_works(self):
+        for status in ("200\nhttps://api.osv.dev/v1/query\n0",
+                       "200\nhttps://api.osv.dev/v1/query\n0\n",
+                       " 200 \nhttps://api.osv.dev/v1/query\n 0 "):
+            for body in ("{}", '{"vulns": []}'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(data["class"], "clean", (body, status))
+            r, data = self._live(None, status=status, fixture="osv-mal.json")
+            self.assertEqual(data["class"], "malicious", status)
+            rec, _ = self._decide(self._package(),
+                                  [_src("osv", data), self._clean_list()])
+            self.assertEqual(rec["result"], "block")
 
     def test_live_next_page_token_fails_closed(self):
         r, data = self._live('{"vulns": [], "next_page_token": "x"}')
@@ -342,11 +405,11 @@ class TestDecisions(unittest.TestCase):
 
     def test_live_non_200_fails_closed(self):
         for body in ("{}", '{"vulns": []}'):
-            for status in ("500\nhttps://api.osv.dev/v1/query", "429\nhttps://api.osv.dev/v1/query",
-                           "000\nhttps://api.osv.dev/v1/query"):
+            for status in ("500\nhttps://api.osv.dev/v1/query\n0", "429\nhttps://api.osv.dev/v1/query\n0",
+                           "000\nhttps://api.osv.dev/v1/query\n0"):
                 r, data = self._live(body, status=status)
                 self.assertEqual(data["class"], "injection_seen", (body, status))
-        r, data = self._live("{}", status="500\nhttps://api.osv.dev/v1/query")
+        r, data = self._live("{}", status="500\nhttps://api.osv.dev/v1/query\n0")
         self._assert_failed_closed(data)
 
     def test_live_non_object_body_fails_closed(self):
@@ -367,8 +430,47 @@ class TestDecisions(unittest.TestCase):
 
     def test_live_timeout_status_fails_closed(self):
         for body in ("{}", "", '{"vulns":'):
-            r, data = self._live(body, status="000\n")
-            self.assertEqual(data["class"], "injection_seen", body)
+            r, data = self._live(body, status="000\nhttps://api.osv.dev/v1/query\n28")
+            self.assertEqual(data["class"], "check_failed", body)
+
+    def test_live_000_with_exact_url_and_nonzero_exit_is_check_failed(self):
+        for code in ("28", "7", "6", "60"):
+            status = "000\nhttps://api.osv.dev/v1/query\n" + code
+            for body in ("{}", '{"vulns": []}', "", '{"vulns":'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(data["class"], "check_failed", (body, status))
+        r, data = self._live("{}", status="000\nhttps://api.osv.dev/v1/query\n28")
+        self._assert_failed_closed(data, "check_failed")
+        r, data = self._live(None, status="000\nhttps://api.osv.dev/v1/query\n28", fixture="osv-mal.json")
+        self._assert_failed_closed(data, "check_failed")
+        self.assertNotEqual(data["class"], "malicious")
+
+    def test_live_check_failed_needs_200_or_000_and_exact_url(self):
+        for status in ("500\nhttps://api.osv.dev/v1/query\n28", "429\nhttps://api.osv.dev/v1/query\n7",
+                       "500\nhttps://api.osv.dev/v1/query\n7",
+                       "000\nhttps://api.osv.dev/v1/query\n0",
+                       "000\nhttps://evil.example/v1/query\n7", "200\nhttps://evil.example/v1/query\n7",
+                       "200\nhttps://api.osv.dev/v1/querybatch\n7",
+                       "000\nhttps://api.osv.dev/v1/querybatch\n7"):
+            for body in ("{}", '{"vulns": []}'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(data["class"], "injection_seen", (body, status))
+        r, data = self._live(None, status="000\nhttps://api.osv.dev/v1/query\n28", fixture="osv-mal.json")
+        self.assertNotEqual(data["class"], "malicious")
+
+    def test_check_failed_line_text_is_pinned(self):
+        with open(os.path.join(REPO, "skills", "kings-taster-check.md"), encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+        fetch = [l for l in lines if "Fetch (except the list file)" in l]
+        self.assertEqual(len(fetch), 1)
+        self.assertIn("`extract-osv` also checks that exit code in the status file. "
+                      "The GitHub, RDAP and Safe Browsing extractors don't, so they rely on this fetch rule.",
+                      fetch[0])
+        lst = [l for l in lines if "List file (only allowed redirect)" in l]
+        self.assertEqual(len(lst), 1)
+        for needle in ("mktemp", "$RAW", "$CODE", "removed after use", "including on failure", '> "$CODE"'):
+            self.assertIn(needle, lst[0], needle)
 
     def test_popular_malicious_is_pending_review(self):
         r, data = _extract("osv", "osv-popular-mal.json", OSV_STATUS_OK)
@@ -757,6 +859,17 @@ class TestHosts(unittest.TestCase):
         self.assertFalse(C.host_allowed("github.com:8443", self.LIST_OK))
         self.assertFalse(C.host_allowed("https://api.osv.dev:443/v1/query"))
         self.assertTrue(C.host_allowed("https://github.com" + self.LIST_OK))
+
+    def test_non_str_host_or_path_fails_closed(self):
+        # An allowed host/path must still be refused when the argument isn't a str.
+        cases = (
+            (b"api.osv.dev", ""),
+            (None, ""),
+            ("api.osv.dev", b"/v1/query"),
+            ("api.osv.dev", None),
+        )
+        for host, url_path in cases:
+            self.assertFalse(C.host_allowed(host, url_path), (host, url_path))
 
 
 @unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")

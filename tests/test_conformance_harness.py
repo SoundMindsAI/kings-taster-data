@@ -52,7 +52,7 @@ def _item(spec):
     return item
 
 
-# curl status file for extract-osv: HTTP 200 and the exact query URL.
+# curl status file for extract-osv: HTTP 200, the exact query URL, and exit code 0.
 OSV_STATUS_OK = os.path.join(FIX, "osv-status-ok.txt")
 
 
@@ -141,7 +141,7 @@ def _build_source(name, token, item):
                     json.dump(token["body"], fh)
                 code = os.path.join(tmp, "code.txt")
                 with open(code, "w", encoding="utf-8") as fh:
-                    fh.write("200\nhttps://api.osv.dev/v1/query")
+                    fh.write("200\nhttps://api.osv.dev/v1/query\n0")
                 r = C.run_extractor("osv", path, code)
             return _src(name, C.parse_extracted(r.stdout))
         if token.get("status") == "ok" and name == "rdap":

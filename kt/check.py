@@ -34,7 +34,6 @@ ALLOWED_HOSTS = frozenset({
     "data.iana.org",
     "safebrowsing.googleapis.com",
 })
-LIST_REDIRECT_HOSTS = frozenset({"github.com", "release-assets.githubusercontent.com"})
 LIST_PATH_PREFIX = U.LIST_PATH_PREFIX
 BANNED = re.compile(r"\bsafe(ly|ty)?\b(?!\s+browsing)|guarantee", re.IGNORECASE)
 # The skill body may mention the ban itself; the Google notice is only in Commands.
@@ -129,16 +128,22 @@ def parse_extracted(stdout):
     return data
 
 
-def _split_host_path(host, url_path):
-    """Accept a bare host + path, or a full URL in either argument.
+def _split_host_paths(host, url_path):
+    """Return (hostname, [paths]); the host is empty when the arguments are refused.
 
     Every argument goes through the shared parser, so a bad authority in any of
-    them (userinfo, port, backslash, ...) gives an empty host. When url_path is a
-    full URL, the hostname comes from that URL; a bare host or a second full URL
-    that names another host is a mismatch (empty host).
+    them (userinfo, port, backslash, ...) gives an empty host. A full URL must be
+    https (or a '//host' reference). Control characters, space and DEL are refused
+    in every form, including a bare host with a bare path. When url_path is a full
+    URL, the hostname and path come from it; a bare host or a second full URL that
+    names another host is a mismatch. With two full URLs both paths are returned.
     """
+    if not isinstance(host, str) or not isinstance(url_path, str):
+        return "", ["/"]
     path = url_path or ""
     raw_host = host or ""
+    if any(c <= " " or c == "\x7f" for c in raw_host + path):
+        return "", ["/"]
     host_is_url = U.is_url(raw_host)
     path_is_url = U.is_url(path)
     try:
@@ -146,26 +151,35 @@ def _split_host_path(host, url_path):
         path_url = U.split_url(path) if path_is_url else None
         bare = U.bare_host(raw_host) if raw_host and not host_is_url else None
     except ValueError:
-        return "", "/"
+        return "", ["/"]
+    if any(u is not None and u[0] not in ("https", "") for u in (host_url, path_url)):
+        return "", ["/"]
     if host_url is None and path_url is None:
-        return bare or "", path.split("?", 1)[0].split("#", 1)[0]
-    source = host_url or path_url
-    hostname, parsed_path = source[1], source[2]
-    if host_url and path_url and host_url[1] != path_url[1]:
-        return "", parsed_path
+        return bare or "", [path.split("?", 1)[0].split("#", 1)[0]]
+    # With two full URLs, every path is returned so none goes unchecked.
+    paths = [u[2] for u in (host_url, path_url) if u is not None]
+    hostname = (host_url or path_url)[1]
+    if host_url and path_url and not U.same_host(raw_host, path):
+        return "", paths
     if bare is not None and bare != hostname:
-        return "", parsed_path
-    return hostname, parsed_path
+        return "", paths
+    return hostname, paths
+
+
+def _split_host_path(host, url_path):
+    """(hostname, path) for the first path; host_allowed checks every path."""
+    hostname, paths = _split_host_paths(host, url_path)
+    return hostname, paths[0]
 
 
 def host_allowed(host, url_path="", list_redirect=False):
     """True only for allowlisted hosts. github.com is list-download paths only (no /repos/)."""
-    host, url_path = _split_host_path(host, url_path)
+    host, paths = _split_host_paths(host, url_path)
     host = (host or "").lower()
     if list_redirect:
-        return host in LIST_REDIRECT_HOSTS
+        return host in U.LIST_HOSTS
     if host == "github.com":
-        return U.list_path_ok(url_path)
+        return all(U.list_path_ok(p) for p in paths)
     if host not in ALLOWED_HOSTS:
         return False
     if host == "release-assets.githubusercontent.com":
