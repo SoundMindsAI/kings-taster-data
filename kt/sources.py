@@ -1,4 +1,8 @@
-"""Clearly licensed sources included in v1, with license and attribution (see sources/LICENSES.md)."""
+"""Clearly licensed sources included in the list file, with license and attribution.
+
+The public table is sources/LICENSES.md, with the same rows in sources/licensing.json.
+Only sources with use=list_file in that table may be fetched by the pipeline.
+"""
 
 KEV = {
     "id": "cisa-kev",
@@ -36,5 +40,5 @@ KT_LIST = {
     "upstream_origin": "kings-taster-canary",
 }
 
-# Sources deliberately NOT included in v1 (each has a 'pending' row in sources/LICENSES.md).
-EXCLUDED = ["Google Safe Browsing", "SafeDep", "StepSecurity", "Socket"]
+# Pipeline fetchers allowed by sources/licensing.json (tests check this list).
+LIST_FETCHERS = ("cisa-kev", "osv-npm", "osv-pypi")
