@@ -73,6 +73,8 @@ class TestSkillAndRoutineCaps(unittest.TestCase):
                 self.assertNotIn(banned, src, banned)
 
 
+@unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen not installed")
+class SignedCacheCase(unittest.TestCase):
     def setUp(self):
         from tests.test_sign_verify import keygen, sign_dir
         self.tmp = tmpdir(self)
