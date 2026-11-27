@@ -25,7 +25,7 @@ each citing its sources and their dates. It never says "safe".
   It can make mistakes or be tricked by what it reads. "No known reports" means nothing was found, not that
   it's safe. Your checks go from your bot to the sources listed, and to your bot's AI provider, never to
   SoundMinds. Any keys you add are visible to your bot's AI.
-- The install button on soundminds.ai will be the only official copy from us; copies from anywhere else are not.
+- The install button on [soundminds.ai/kings-taster](https://soundminds.ai/kings-taster) will be the only official place to get King's Taster from us. Don't install a copy from anywhere else.
 - You will install King's Taster from [soundminds.ai/kings-taster](https://soundminds.ai/kings-taster) once that page is live.
 
 ## 2. Trust model
@@ -124,12 +124,14 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
   and `iocs.json` are read from disk by code, never loaded whole.
 - There are two routines, each one line pointing to a skill: a daily list refresh, and one weekly health check
   (§4D). The weekly health check covers the conformance rerun and the routing check, so the self-check, the conformance rerun and the routing check share one weekly run instead of three separate ones. Both routines are silent unless something changed for the user.
-- **Caching:** the list file is kept until a new signed `latest.json` appears (compare its hash first). Once
-  the list is sharded (§6.5), the manifest and the cached shards are kept until a new signed manifest appears.
-  The bot compares the signed `latest.json` and manifest hashes before downloading anything, and refetches a
-  cached shard only if its SHA-256 in the new manifest changed.
-  Package and repo verdicts may be reused for the same name, version and list-file hash within 24 hours,
-  showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
+- **Caching:** until the list is sharded, the list file is kept until a new signed `latest.json` appears
+  (compare its hash first), and the cache is keyed on that single list-file hash. After sharding (§6.5), the
+  cache will be keyed on the manifest hash and each shard's SHA-256, not on a single list-file hash. The
+  manifest and the cached shards will be kept until a new signed manifest appears. The bot will compare the
+  signed `latest.json` and manifest hashes before downloading anything, and will refetch a cached shard only if
+  its SHA-256 in the new manifest changed.
+  Package and repo verdicts may be reused within 24 hours for the same name and version and the same list hash
+  (after sharding, the same manifest hash and shard SHA-256), showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
   file is cached for 7 days.
 - A normal check loads 2,000 words or fewer and never loads `kings-taster-build`.
 
@@ -259,20 +261,22 @@ are always checked live as well.
 
 ### 6.5 Sharding (planned, not built yet)
 
-Today each release has one `iocs.json`. A live full build was 196 MB, or 7.2 MB gzipped, with 238,538 entries,
-which is too much for a bot to download for every check. The list will therefore be split into shards. This
-release does not build shards yet.
+Until sharding is built, a release uses one `iocs.json` file. A full build from a live fetch of the sources on
+2026-11-26 was 196 MB, or 7.2 MB gzipped, with 238,538 entries, which is too much for a bot to download for
+every check. Those figures come from that live build, not from the recorded test fixtures in this repo, which
+are a different snapshot. The list will therefore be split into shards. This format does not build shards yet.
+When sharding is built, it will work like this:
 
-- **Shard key.** Entries are grouped by ecosystem (npm, PyPI) or by type, and then by the first byte of the
-  SHA-256 of each entry's `match_key`. That gives up to 256 shards per ecosystem or type. The prefix length
+- **Shard key.** Entries will be grouped by ecosystem (npm, PyPI) or by type, and then by the first byte of the
+  SHA-256 of each entry's `match_key`. That will give up to 256 shards per ecosystem or type. The prefix length
   may change so that each shard stays under its cap and still holds many entries.
-- **Signed manifest.** A small signed `manifest.json` lists each shard's name, SHA-256, entry count and size.
-  `latest.json` points to it.
-- **What the bot fetches.** The bot downloads only the shard for the item it's checking, checks its SHA-256
-  against the manifest, and caches it (§4B).
-- **Caps.** The manifest is at most 5 MB, and each shard is at most 5 MB gzipped. A client rejects anything
-  over a cap as `check_failed`, and a shard over its cap fails the build.
-- **Privacy.** Fetching a shard shows GitHub only the item's ecosystem and a hash bucket shared by many items,
+- **Signed manifest.** A small signed `manifest.json` will list each shard's name, SHA-256, entry count and size.
+  `latest.json` will point to it.
+- **What the bot fetches.** The bot will download only the shard for the item it's checking, check its SHA-256
+  against the manifest, and cache it (§4B).
+- **Caps.** The manifest will be at most 5 MB, and each shard at most 5 MB gzipped. A client will reject anything
+  over a cap as `check_failed`, and a shard over its cap will fail the build.
+- **Privacy.** Fetching a shard will show GitHub only the item's ecosystem and a hash bucket shared by many items,
   never the item itself.
 
 ## 7. Pipeline and signing
@@ -398,7 +402,8 @@ Unknown when a check fails, 0 uses of "safe", and the §4B budget, each over at 
 
 ### 10.1 Data sharing rules
 
-These rules are a release requirement.
+This section describes the King's Taster bot once it's available from the install page. These rules are a
+release requirement.
 
 **Lookups send only the item.** A check sends only the item to the official sources named in that check's
 answer: the package name and version, the repo's owner and name, or the domain (or the link's 4-byte hash prefix
@@ -431,7 +436,7 @@ does: X sees the account that posts it.
 
 **The plain statement,** shown at first run, on the King's Taster page and in this repo's README:
 
-> When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what you ask it to check and what comes back, like anything else you ask it. A finding is shared only when you approve the exact post, each time.
+> When you check something, your bot sends only that item (the package name and version, the repo name, or the link's domain or hash prefix) to the official sources named in the answer. It sends nothing about you, except the IP address every web request carries, and your Safe Browsing key if you add one. Your Grok Bot's AI sees what you ask it to check and what comes back, like anything else you ask it, and it also sees any key you add. A finding is shared only when you approve the exact post, each time.
 
 No wording stronger than this statement is ever used.
 
