@@ -13,12 +13,13 @@ import tempfile
 
 from .common import ECO_PREFIX, parse_time, read_json, sha256_bytes, utc_now
 from .shards import looks_like_shard_filename
-from .validate import CANARY_TYPES, FUTURE_SKEW_SECONDS, list_canary_keys, validate_release_dir
+from .validate import CANARY_TYPES, FUTURE_SKEW_SECONDS, list_canary_pairs, validate_release_dir
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SILENT_SOURCES = ("cisa-kev", "osv-npm", "osv-pypi")
 DEFAULT_GAPS = {"cisa-kev": 14, "osv-npm": 3, "osv-pypi": 3}
 SIZE_JUMP_RATIO = 0.5
+MAX_ALERT_AFTER_HOURS = 72
 EXIT_OK = 0
 EXIT_FAIL = 1
 EXIT_HOLD = 10  # distinct from argparse's usage-error status (2)
@@ -134,8 +135,10 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
             # Strict "today" only for the daily (unsigned) build, as SPEC.md §7.5 says.
             _add(report, "dates", "fail", "generated_at is not today's date")
         elif signed or pre_sign:
-            hours = int(cfg.get("alert_after_hours", 26))
-            if (now - generated).total_seconds() > hours * 3600:
+            hours = cfg.get("alert_after_hours", 26)
+            if isinstance(hours, bool) or not isinstance(hours, int) or not 1 <= hours <= MAX_ALERT_AFTER_HOURS:
+                _add(report, "dates", "fail", "alert_after_hours must be a whole number from 1 to %d" % MAX_ALERT_AFTER_HOURS)
+            elif (now - generated).total_seconds() > hours * 3600:
                 _add(report, "dates", "fail", "generated_at is older than %d hours" % hours)
             else:
                 date_ok = True
@@ -163,10 +166,13 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
     have = set()
     flagged_keys = []
     bad_ids = []
+    unflagged_ids = []
     for e in iocs.get("entries") or []:
-        if not e.get("canary"):
-            continue
         eid = e.get("id")
+        if not e.get("canary"):
+            if isinstance(eid, str) and eid.startswith("canary:"):
+                unflagged_ids.append(eid[:60])
+            continue
         if not (isinstance(eid, str) and eid.startswith("canary:")):
             bad_ids.append(str(eid)[:60] if eid is not None else "?")
         typ = e.get("type") or ""
@@ -175,13 +181,15 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
         else:
             have.add(typ)
         mk = e.get("match_key")
-        flagged_keys.append(mk if isinstance(mk, str) else "?")
+        flagged_keys.append((typ, mk if isinstance(mk, str) else "?"))
     missing_c = sorted(CANARY_TYPES - have)
     expected_keys = _expected_canary_keys(root)
     if missing_c:
         _add(report, "canaries", "fail", "missing canary types: %s" % ", ".join(missing_c))
     elif bad_ids:
         _add(report, "canaries", "fail", "canary flag on non-canary ids: %s" % ", ".join(bad_ids[:8]))
+    elif unflagged_ids:
+        _add(report, "canaries", "fail", "canary id without the canary flag: %s" % ", ".join(unflagged_ids[:8]))
     elif expected_keys is None:
         _add(report, "canaries", "fail", "config/canaries.json is missing, unreadable or lists no canaries")
     elif sorted(flagged_keys) != expected_keys:
@@ -273,9 +281,9 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
 
 
 def _expected_canary_keys(root):
-    """Sorted match_key values of the fixed list canaries in config/canaries.json,
+    """Sorted (type, match_key) pairs of the fixed list canaries in config/canaries.json,
     or None when the file is missing, unreadable or empty (the check must fail)."""
-    return list_canary_keys(root)
+    return list_canary_pairs(root)
 
 
 def _size_jumps(release_dir, manifest, previous_dir, prev_manifest, ratio):
@@ -333,7 +341,7 @@ def write_report(path, report):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     ap.add_argument("release_dir")
     ap.add_argument("--previous")
     ap.add_argument("--signed", action="store_true")

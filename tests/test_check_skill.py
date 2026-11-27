@@ -192,7 +192,9 @@ class TestDecisions(unittest.TestCase):
         }
 
     def _decide(self, item, sources, **kw):
-        rec, lines = C.decide(item, sources, now=NOW, finding_id=FID,
+        kw.setdefault("now", NOW)
+        kw.setdefault("template_version", "1.0.0")
+        rec, lines = C.decide(item, sources, finding_id=FID,
                               finding_path="~/.kings-taster/findings/%s.json" % FID, **kw)
         errs = validate_record(rec)
         self.assertEqual(errs, [], errs)
@@ -239,18 +241,29 @@ class TestDecisions(unittest.TestCase):
         rec, lines = self._decide(self._package("lodash", "4.0.0", "npm"), [
             _src("osv", data),
             _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
-        ])  # popular= omitted: decide() must read config/popular/ itself
+        ])  # decide() reads config/popular/ itself; there is no flag to bypass it
         self.assertEqual(rec["result"], "caution")
         self.assertIn("pending_review", rec["reasons"])
         self.assertNotIn("malicious_match", rec["reasons"])
         self.assertIn("pending review", rec["explanation"])
-        # An explicit popular=False must not bypass the list for lodash.
-        rec2, _ = self._decide(self._package("lodash", "4.0.0", "npm"), [
-            _src("osv", data),
-            _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True),
-        ], popular=False)
-        self.assertEqual(rec2["result"], "caution")
-        self.assertIn("pending_review", rec2["reasons"])
+
+    def test_popular_flag_is_gone(self):
+        with self.assertRaises(TypeError):
+            C.decide(self._package(), [], now=NOW, template_version="1.0.0", popular=False)
+
+    def test_now_and_template_version_are_required(self):
+        item = self._package()
+        with self.assertRaises(TypeError):
+            C.decide(item, [], template_version="1.0.0")
+        with self.assertRaises(TypeError):
+            C.decide(item, [], now=NOW)
+
+    def test_popular_names_are_cached_and_clearable(self):
+        C.clear_popular_cache()
+        first = C._popular_names()
+        self.assertIs(C._popular_names(), first)
+        C.clear_popular_cache()
+        self.assertEqual(C._popular_names(), first)
 
     def test_is_popular_ecosystem_spelling_is_case_insensitive(self):
         self.assertTrue(C.is_popular("npm", "lodash"))
@@ -546,6 +559,41 @@ class TestHosts(unittest.TestCase):
         self.assertNotEqual((host_q or "").lower(), "github.com")
         self.assertNotEqual((host_h or "").lower(), "github.com")
 
+    def test_two_full_urls_must_name_the_same_host(self):
+        # N3: both arguments full URLs: the second must not be ignored.
+        good = "https://github.com" + self.LIST_OK
+        evil = "https://evil.example" + self.LIST_OK
+        self.assertFalse(C.host_allowed(good, evil))
+        self.assertFalse(C.host_allowed(evil, good))
+        host, _ = C._split_host_path(good, evil)
+        self.assertEqual(host, "")
+        self.assertTrue(C.host_allowed(good, "https://GitHub.com" + self.LIST_OK))
+
+    def test_backslash_semicolon_tab_or_userinfo_in_authority_is_refused(self):
+        # N12: WHATWG parsers read '\' as a path separator, so these name another host.
+        for sep in ("\\", ";", "\t"):
+            with self.subTest(sep=repr(sep)):
+                self.assertFalse(C.host_allowed("https://evil.example" + sep + "@" + "github.com" + self.LIST_OK))
+        self.assertFalse(C.host_allowed("https://user@" + "github.com" + self.LIST_OK))
+        self.assertTrue(C.host_allowed("https://github.com" + self.LIST_OK))
+
+    def test_l1_authority_refusals_apply_to_every_argument(self):
+        official = "https://github.com" + self.LIST_OK
+        # Second URL: github.com:x plus userinfo at evil.example must not read as host github.com.
+        tricky = "https://github.com:x" + "@" + "evil.example" + self.LIST_OK
+        self.assertFalse(C.host_allowed("https://github.com" + self.LIST_OK, tricky))
+        self.assertFalse(C.host_allowed(tricky, official))
+        # Bare host with userinfo must not be reduced to its last '@' part.
+        self.assertFalse(C.host_allowed("evil" + "@" + "github.com", official))
+        self.assertTrue(C.host_allowed("github.com", official))
+
+    def test_l3_explicit_port_is_refused(self):
+        self.assertFalse(C.host_allowed("https://github.com:8443" + self.LIST_OK))
+        self.assertFalse(C.host_allowed("github.com", "https://github.com:8443" + self.LIST_OK))
+        self.assertFalse(C.host_allowed("github.com:8443", self.LIST_OK))
+        self.assertFalse(C.host_allowed("https://api.osv.dev:443/v1/query"))
+        self.assertTrue(C.host_allowed("https://github.com" + self.LIST_OK))
+
 
 @unittest.skipUnless(__import__("shutil").which("ssh-keygen"), "ssh-keygen not installed")
 class TestListVerify(unittest.TestCase):
@@ -587,7 +635,7 @@ class TestListVerify(unittest.TestCase):
                 _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0},
                      release_dir=self.out, allowed_signers=self.allowed),
             ],
-            now="2026-11-27T06:17:00Z", finding_id=FID,
+            now="2026-11-27T06:17:00Z", template_version="1.0.0", finding_id=FID,
             finding_path="~/.kings-taster/findings/%s.json" % FID,
         )
         self.assertEqual(validate_record(rec), [])

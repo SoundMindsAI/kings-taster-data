@@ -176,8 +176,9 @@ def _caps_ok(cache_dir, manifest, *, verified=False):
     recompressed. Pass verified=True only after KV.verify_release returned
     code 0 or 3 for this same cache in this same run: the signed manifest's
     per-shard gzip_bytes is then used instead of recompressing. In that mode a
-    missing or non-integer gzip_bytes is a failure; nothing is inferred from an
-    absent field. The manifest cap always uses the on-disk file size.
+    missing or non-integer gzip_bytes is a failure, and so is a signed size
+    below 1; nothing is inferred from an absent field. The manifest cap always
+    uses the on-disk file size.
     """
     man_path = os.path.join(cache_dir, "manifest.json")
     if os.path.isfile(man_path) and os.path.getsize(man_path) > MAX_MANIFEST_BYTES:
@@ -189,6 +190,8 @@ def _caps_ok(cache_dir, manifest, *, verified=False):
             gz = s.get("gzip_bytes")
             if isinstance(gz, bool) or not isinstance(gz, int):
                 return "a shard has no signed gzip size in the manifest"
+            if gz < 1:
+                return "a shard has an invalid signed gzip size in the manifest"
             if gz > MAX_SHARD_GZIP_BYTES:
                 return "a cached shard is over the 5 MB gzip cap"
             continue

@@ -44,6 +44,14 @@ def list_canary_keys(root=None):
     config/canaries.json, or None when the file is missing, unreadable, malformed
     or lists no canaries. Callers must treat None as a failure, never as "nothing
     expected"."""
+    pairs = list_canary_pairs(root)
+    return None if pairs is None else sorted(k for _, k in pairs)
+
+
+def list_canary_pairs(root=None):
+    """Sorted (type, match_key) pairs of the fixed list canaries, or None on any
+    problem (same rules as list_canary_keys). Binding each key to its type stops
+    two canaries from swapping keys."""
     path = os.path.join(root or ROOT, "config", "canaries.json")
     try:
         doc = read_json(path)
@@ -56,8 +64,8 @@ def list_canary_keys(root=None):
         if not isinstance(e, dict) or "type" not in e or "value" not in e:
             return None
         try:
-            keys.append(match_key(e["type"], e["value"], e.get("ecosystem")))
-        except (KeyError, ValueError, TypeError):
+            keys.append((e["type"], match_key(e["type"], e["value"], e.get("ecosystem"))))
+        except (KeyError, ValueError, TypeError, AttributeError):
             return None
     return sorted(keys) or None
 
@@ -120,7 +128,7 @@ def validate_iocs(doc, fast_entries=False, root=None):
             errors.append("entry %s: vulnerable entries are never held or blocked" % e["id"][:60])
         if e["canary"]:
             canaries.add(t + (":" + ECO_PREFIX[e["ecosystem"]] if t == "package" else ""))
-            canary_keys.append(e["match_key"])
+            canary_keys.append((e["type"], e["match_key"]))
             if e["kind"] != "malicious":
                 errors.append("entry %s: canaries are malicious entries" % e["id"][:60])
             if not e["id"].startswith("canary:"):
@@ -135,11 +143,12 @@ def validate_iocs(doc, fast_entries=False, root=None):
             errors.append("entry %s: bad time" % e["id"][:60])
     if canaries != CANARY_TYPES:
         errors.append("entries: canary set incomplete (%s missing)" % sorted(CANARY_TYPES - canaries))
-    expected_keys = list_canary_keys(root)
+    expected_keys = list_canary_pairs(root)
     if expected_keys is None:
         errors.append("canaries: config/canaries.json is missing, unreadable or lists no canaries")
     elif sorted(canary_keys) != expected_keys:
-        # Exact multiset match: no missing, extra or duplicated canary match_key.
+        # Exact multiset match of (type, match_key): no missing, extra, duplicated
+        # or swapped canary match_key.
         errors.append("entries: canary match_keys differ from config/canaries.json")
     by_src = {}
     for e in doc["entries"]:

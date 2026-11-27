@@ -315,6 +315,9 @@ class TestN4PortZeroRefused(unittest.TestCase):
     def test_port_zero_is_not_an_official_host(self):
         url = "https://osv.dev:0/vulnerability/MAL-2026-1"
         self.assertIsNotNone(finding.official_url_problem(url, finding.EXPLANATION_URL_HOSTS))
+        # N11: a bad port is "unparsable", not a ValueError.
+        self.assertEqual(finding.official_url_problem("https://osv.dev:-0/vulnerability/X",
+                                                      finding.EXPLANATION_URL_HOSTS), "unparsable")
         self.assertIsNotNone(finding.official_url_problem("https://osv.dev:443/vulnerability/MAL-2026-1",
                                                           finding.EXPLANATION_URL_HOSTS))
         self.assertIsNone(finding.official_url_problem("https://osv.dev/vulnerability/MAL-2026-1",

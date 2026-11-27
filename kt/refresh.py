@@ -3,7 +3,6 @@ import errno
 import fcntl
 import json
 import os
-import posixpath
 import re
 import shutil
 import subprocess
@@ -11,6 +10,7 @@ import tempfile
 
 from .common import parse_time, sha256_file, utc_now
 from . import verify as KV
+from .urlcheck import LIST_PATH_PREFIX, list_download_url_ok
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SKILL_PATH = os.path.join(ROOT, "skills", "kings-taster-list-refresh.md")
@@ -20,7 +20,6 @@ WORD_CAP = 200
 COMMAND_LINE_CAP = 40
 STALE_HOURS = 48
 TAG_RE = re.compile(r"^kt-[0-9A-Za-z._-]{1,64}$")
-LIST_PATH_PREFIX = "/SoundMindsAI/kings-taster-data/releases/download/"
 LATEST_URL = "https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json"
 BANNED = re.compile(r"\bsafe(ly|ty)?\b(?!\s+browsing)|guarantee", re.IGNORECASE)
 SAFE_EXCEPTIONS = ('Never say "safe"',)
@@ -51,53 +50,9 @@ def routine_line():
         return f.read().strip()
 
 
-def _unquote_path(value, times=4):
-    out = value or ""
-    for _ in range(times):
-        nxt = re.sub(r"%([0-9A-Fa-f]{2})",
-                     lambda m: bytes.fromhex(m.group(1)).decode("latin-1"), out)
-        if nxt == out:
-            break
-        out = nxt
-    return out
-
-
-def _has_dotdot(value):
-    raw = value or ""
-    lower = raw.lower()
-    if ".." in raw or "%2e%2e" in lower or "%2e." in lower or ".%2e" in lower or "%252e" in lower:
-        return True
-    return False
-
-
 def list_url_allowed(url, list_redirect=False):
     """True only for the list-file download hosts and path prefix."""
-    raw = url or ""
-    if not raw.lower().startswith("https://"):
-        return False
-    if "://" in raw:
-        rest = raw.split("://", 1)[1]
-        host, _, path = rest.partition("/")
-        path = "/" + path.split("?", 1)[0].split("#", 1)[0]
-        if "@" in host:
-            host = host.rsplit("@", 1)[1]
-        host = host.split(":", 1)[0].lower()
-    else:
-        return False
-    if list_redirect:
-        return host in ("github.com", "release-assets.githubusercontent.com")
-    if host != "github.com":
-        return False
-    if _has_dotdot(path) or _has_dotdot(_unquote_path(path)):
-        return False
-    decoded = _unquote_path(path)
-    if not decoded.startswith("/"):
-        decoded = "/" + decoded
-    normalized = posixpath.normpath(decoded)
-    if not normalized.startswith(LIST_PATH_PREFIX):
-        return False
-    parts = [p for p in normalized[len(LIST_PATH_PREFIX):].split("/") if p]
-    return len(parts) >= 2 and ".." not in parts
+    return list_download_url_ok(url, list_redirect)
 
 
 class LocalFetcher:
@@ -330,10 +285,12 @@ def refresh(cache_dir, source_dir, *, fetcher=None, allowed_signers=None,
 
     def fail(reason, detail):
         result["failed"] = reason
+        had_cache = os.path.isfile(os.path.join(cache_dir, "latest.json"))
         result["lines"] = [
             "List refresh failed: %s." % reason,
             detail,
-            "The last good cache was kept.",
+            "The last good cache was kept." if had_cache
+            else "There is no cached list yet, so nothing was installed.",
         ][:3]
         return result
 
