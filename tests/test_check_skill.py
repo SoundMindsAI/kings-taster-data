@@ -19,7 +19,7 @@ UNCLEARED = re.compile(
 FID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 NOW = "2026-11-26T23:40:00Z"
 SHA = "abababababababababababababababababababababababababababababababab"
-# curl status file for extract-osv: HTTP 200 and the exact query URL.
+# curl status file for extract-osv: HTTP 200, the exact query URL, and exit code 0.
 OSV_STATUS_OK = "osv-status-ok.txt"
 
 
@@ -247,7 +247,7 @@ class TestDecisions(unittest.TestCase):
         self.assertTrue(rec["explanation"].startswith("No known reports. Checked against"))
         self.assertFalse(any(l.startswith("Reason:") for l in lines))
 
-    def _live(self, body, status="200\nhttps://api.osv.dev/v1/query", fixture=None):
+    def _live(self, body, status="200\nhttps://api.osv.dev/v1/query\n0", fixture=None):
         """Run extract-osv on a body plus a curl status file (None = no status file)."""
         with tempfile.TemporaryDirectory() as tmp:
             raw = os.path.join(tmp, "raw.json")
@@ -330,13 +330,43 @@ class TestDecisions(unittest.TestCase):
             self.assertEqual(data["class"], "injection_seen")
 
     def test_live_empty_object_without_confirmed_status_fails_closed(self):
-        for status in (None, "", "200", "200\nhttps://evil.example/v1/query",
+        for status in (None, "", "200", "200\nhttps://api.osv.dev/v1/query",
+                       "200\nhttps://evil.example/v1/query\n0",
                        "200\nhttp://api.osv.dev/v1/query", "200\nhttps://api.osv.dev.evil.example/",
                        "200\nhttps://api.osv.dev/v1/querybatch", "200\nhttps://api.osv.dev/"):
             r, data = self._live("{}", status=status)
             self.assertEqual(data["class"], "injection_seen", repr(status))
         r, data = _extract("osv", "osv-empty-object.json", os.path.join(FIX, "does-not-exist.txt"))
         self.assertEqual(data["class"], "injection_seen")
+
+    def test_live_exit_code_line_required_and_zero(self):
+        url = "200\nhttps://api.osv.dev/v1/query"
+        bad = (url, url + "\n", url + "\n\n", url + "\n  \n", url + "\n00", url + "\n0.0",
+               url + "\n1", url + "\n28", url + "\n63", url + "\n7", url + "\n-0",
+               url + "\n0 1", url + "\nx")
+        for body in ("{}", '{"vulns": []}'):
+            for status in bad:
+                r, data = self._live(body, status=status)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(data["class"], "injection_seen", (body, status))
+        r, data = self._live("{}", status=url + "\n63")
+        self._assert_failed_closed(data)
+        # A non-zero exit code also blocks a MAL body from being read as a normal reply.
+        r, data = self._live(None, status=url + "\n28", fixture="osv-mal.json")
+        self.assertEqual(data["class"], "injection_seen")
+
+    def test_live_exit_code_zero_still_works(self):
+        for status in ("200\nhttps://api.osv.dev/v1/query\n0",
+                       "200\nhttps://api.osv.dev/v1/query\n0\n",
+                       " 200 \nhttps://api.osv.dev/v1/query\n 0 "):
+            for body in ("{}", '{"vulns": []}'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(data["class"], "clean", (body, status))
+            r, data = self._live(None, status=status, fixture="osv-mal.json")
+            self.assertEqual(data["class"], "malicious", status)
+            rec, _ = self._decide(self._package(),
+                                  [_src("osv", data), self._clean_list()])
+            self.assertEqual(rec["result"], "block")
 
     def test_live_next_page_token_fails_closed(self):
         r, data = self._live('{"vulns": [], "next_page_token": "x"}')

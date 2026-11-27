@@ -31,9 +31,9 @@ Reuse package or repo Caution or No known reports for 24 hours only if name, ver
 
 Hosts: `api.osv.dev`, `api.github.com`, `github.com` (only `/SoundMindsAI/kings-taster-data/releases/download/…`), `release-assets.githubusercontent.com` (only the one list-file redirect), `data.iana.org`, RDAP hosts from the IANA bootstrap file, and `safebrowsing.googleapis.com`. Any other host is `injection_seen`.
 
-Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list file), with two fresh `mktemp` files per request (`$RAW` and `$CODE`), removed after use: `curl --proto =https --max-redirs 0 --max-filesize 5242880 -sS -o "$RAW" -w '%{http_code}\n%{url_effective}\n%{exitcode}' > "$CODE"`. Require exit code 0, otherwise the source is failed. Do not use `-L`. Do not contact the item's own URL.
+Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list file), with two fresh `mktemp` files per request (`$RAW` and `$CODE`), removed after use: `curl --proto =https --max-redirs 0 --max-filesize 5242880 -sS -o "$RAW" -w '%{http_code}\n%{url_effective}\n%{exitcode}' > "$CODE"`. Require exit code 0. Any other exit code means the source failed. Do not use `-L`. Do not contact the item's own URL.
 
-- OSV: `POST https://api.osv.dev/v1/query` with `{"package":{"name":"$NAME","ecosystem":"$ECO"},"version":"$VER"}`. Also query that ecosystem's `osv_canaries` package and version from `config/canaries.json`; the canary passes only if its response prints that configured `id`, otherwise OSV counts as failed. Use `$OSV_TOKEN` only if set; never print it.
+- OSV: `POST https://api.osv.dev/v1/query` with `{"package":{"name":"$NAME","ecosystem":"$ECO"},"version":"$VER"}`. Also query that ecosystem's `osv_canaries` package and version from `config/canaries.json`. The canary passes only if its response prints that configured `id`. If it doesn't, OSV counts as failed. Use `$OSV_TOKEN` only if set; never print it.
 - GitHub: `GET https://api.github.com/repos/$OWNER/$REPO`. Send `Authorization: Bearer $GITHUB_TOKEN` only if set; never print it.
 - IANA: `GET https://data.iana.org/rdap/dns.json`, then `GET` the matching RDAP server (HTTPS, max-redirs 0).
 - Safe Browsing v5: `POST https://safebrowsing.googleapis.com/v5/urls:search?key=$SAFE_BROWSING_KEY` with at most 50 URLs, including Google's test URL. Never print the key.
@@ -45,9 +45,9 @@ import json,re,sys
 ID=re.compile(r"^(MAL|GHSA|PYSEC|CVE|OSV)-[A-Za-z0-9._-]{1,80}$"); ECO=re.compile(r"^(npm|PyPI)$"); NAME=re.compile(r"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$"); VER=re.compile(r"^[A-Za-z0-9._+-]{1,64}$"); ISO=re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}")
 def bad():
     print("class injection_seen"); sys.exit(0)
-try: doc=json.load(open(sys.argv[1], encoding="utf-8")); s=(open(sys.argv[2], encoding="utf-8").read().splitlines()+["",""])[:2] if len(sys.argv)>2 else None
+try: doc=json.load(open(sys.argv[1], encoding="utf-8")); s=(open(sys.argv[2], encoding="utf-8").read().splitlines()+["","",""])[:3] if len(sys.argv)>2 else None
 except Exception: bad()
-ok=s is not None and s[0].strip()=="200" and s[1].strip()=="https://api.osv.dev/v1/query"; vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else ([] if doc=={} and s is not None and ok else None)
+ok=s is not None and s[0].strip()=="200" and s[1].strip()=="https://api.osv.dev/v1/query" and s[2].strip()=="0"; vulns=doc["vulns"] if isinstance(doc, dict) and isinstance(doc.get("vulns"), list) else ([] if doc=={} and s is not None and ok else None)
 if not ok or not isinstance(vulns, list) or len(vulns)>50 or (isinstance(doc, dict) and "next_page_token" in doc): bad()
 rows=[]
 for v in vulns:

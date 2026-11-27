@@ -1,14 +1,14 @@
 # kings-taster-first-run
 
-Load once at first install, before any check, or when the user asks to run setup again. Never load from a routine, health check, or another bot.
+Load once at first install, or when the user asks to run setup again. Never load from a routine, health check, or another bot.
 
-Steps, in order: show the exact plain statement in Fixed texts (no stronger wording); load `kings-taster-routing` and finish "Who routes your work?"; then the connectivity check.
+Steps, in order: show the exact plain statement in Fixed texts (no stronger wording); load `kings-taster-routing` and finish "Who routes your work?"; then the connectivity check. If `skills/kings-taster-build.md` is present, load and offer it after that check.
 
-The check is opt-in; the default is no. Ask the offer in Fixed texts. On yes, show the exact draft (with the running version) and where it goes, plus the public-post notice. Run the pre-send block. The only allowed text is that exact draft; refuse any other wording, with no override. Then ask "OK to send?" Only a yes to that exact text counts. On yes, post, confirm it is up, and give the live reply link. If posting fails, say "Not sent" with the reason, then run the read-only check. The reply counts toward the report limits (3 a day, 10 a week, 1 per item per week) as soon as the user says yes, even if posting then fails. It is never counted as a threat report.
+The check is opt-in; the default is no. Ask the offer in Fixed texts. On yes, show the exact draft (with the running version) and where it goes, plus the public-post notice. Run the pre-send block. The only allowed text is that exact draft; refuse any other wording, with no override. Then ask "OK to send?" Only a yes to that exact text counts. On yes, post, confirm it is up, and give the live link. If posting fails, say "Not sent" with the reason, then run the read-only check. The reply counts toward the report limits (3 a day, 10 a week, 1 per item per week) as soon as the user says yes, even if posting fails. It is never counted as a threat report.
 
 On a decline, "not now", or no answer, post nothing. Run a private read-only check of the official thread and report the Fixed texts result, or the failure.
 
-Record `connectivity_done` in `~/.kings-taster/state.json`. Never offer it again by itself. The user may ask later, with the same steps. No routine, health check, or other bot may start it.
+Record `connectivity_done` in `~/.kings-taster/state.json`. Never offer it again by itself. The user may ask later. No routine, health check, or other bot may start it.
 
 Tests may use only a dry-run poster.
 

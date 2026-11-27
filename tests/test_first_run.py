@@ -55,6 +55,9 @@ class TestSkillTexts(unittest.TestCase):
         self.assertIn("3 a day, 10 a week, 1 per item per week", body)
         self.assertIn("connectivity_done", body)
         self.assertIn("kings-taster-routing", body)
+        self.assertIn("skills/kings-taster-build.md", body)
+        self.assertIn("is present", body)
+        self.assertLess(body.index("connectivity check"), body.index("skills/kings-taster-build.md"))
         # Must not be triggerable as a routine.
         self.assertIn("Never load from a routine", body)
 
