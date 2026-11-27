@@ -94,7 +94,7 @@ class TestCanonicalize(unittest.TestCase):
             except ValueError:
                 refused += 1
                 auth = re.split(rb"[/?]", raw.split(b"://", 1)[-1], maxsplit=1)[0]
-                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw) or b"%" in auth, v["input"])
+                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw) or b"%" in auth or b".." in auth, v["input"])
                 continue
             self.assertEqual(got.encode("latin-1"), B.decode_c_escapes(v["expected"]), v["input"])
         self.assertGreaterEqual(refused, 4)
@@ -152,8 +152,19 @@ class TestCanonicalize(unittest.TestCase):
 
     def test_dots_follow_google_rules(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
-        for u in ("http://evil.com./", "http://.evil.com/", "http://evil..com/"):
-            self.assertEqual(canon(u), "http://evil.com/")
+        self.assertEqual(canon("http://evil.com./"), "http://evil.com/")
+        for u in ("http://.evil.com/", "http://evil..com/", "http://.1.2.3.4/", "http://1..2/"):
+            with self.assertRaises(ValueError, msg=u):
+                canon(u)
+            self.assertEqual(canon(u, strict=False), canon(u.replace("..", ".").replace("//.", "//")), u)
+
+    def test_strict_refuses_numeric_tld_but_keeps_ips(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        for bad in ("http://evil.123/", "http://.1.2.3.4/", "http://1..2/"):
+            with self.assertRaises(ValueError, msg=bad):
+                canon(bad)
+        self.assertEqual(canon("http://1.2.3.4/"), "http://1.2.3.4/")
+        self.assertEqual(canon("http://127.1/"), "http://127.0.0.1/")
 
     def test_strict_false_keeps_percent_authority_vectors(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
@@ -291,7 +302,7 @@ class TestKeys(unittest.TestCase):
     def test_skill_requires_domain_and_ip(self):
         text = B.skill_text()
         for needle in ("`url-sha256:`, the `domain:` key", "`ip:` key", "SPEC.md §3.3 also requires a lookalike-name check",
-                       "adds none of its own"):
+                       "Leave it out until `kings-taster-check` states that rule."):
             self.assertIn(needle, text, needle)
 
 
@@ -306,6 +317,12 @@ class TestRegexParityAndKeys(unittest.TestCase):
         self.assertEqual(B.PKG_VER.pattern.encode(), ver.encode())
         self.assertEqual(B.REPO_PART.pattern.encode(), repo.encode())
 
+    def test_same_rule_as_valid_package_name(self):
+        self.assertIn(
+            "NAME must also pass the same rule as `kt.common.valid_package_name` for the ecosystem (npm, or PEP 508 for PyPI).",
+            B.skill_text(),
+        )
+
     def test_google_attribution_sentence(self):
         self.assertIn("A Safe Browsing hit must add Google's attribution and notice, with the exact text in the "
                       "`google-notice` block of `kings-taster-check` (`GOOGLE_ATTRIBUTION` and `GOOGLE_NOTICE` "
@@ -318,13 +335,19 @@ class TestRegexParityAndKeys(unittest.TestCase):
             self.assertIn("x-goog-api-key", text, name)
             self.assertNotIn("?key=$SAFE_BROWSING_KEY", text, name)
             self.assertNotIn("urls:search?key=", text, name)
-        self.assertIn("urls:search` with header `x-goog-api-key: $SAFE_BROWSING_KEY`", text_of("kings-taster-check.md"))
-        self.assertIn("never in the URL", B.skill_text())
+        self.assertIn(r"printf 'x-goog-api-key: %s\n'", text_of("kings-taster-check.md"))
+        self.assertIn(r"printf 'x-goog-api-key: %s\n'", B.skill_text())
+        self.assertIn("| curl -H @-", text_of("kings-taster-check.md"))
+        self.assertIn("| curl -H @-", B.skill_text())
+        self.assertIn("never appears in argv", text_of("kings-taster-check.md"))
+        self.assertIn("never appears in argv", B.skill_text())
+        self.assertIn("never appears in argv or the URL", B.skill_text())
 
     def test_skill_states_strict_refusals(self):
         text = B.skill_text()
         for needle in ("authority contains `%`", "never convert an IDN host to Punycode", "0x80",
-                       "`[` or `]`", "not a valid IPv4 address"):
+                       "`[` or `]`", "not a valid IPv4 address", "leading dot or an empty label",
+                       "last label is all digits"):
             self.assertIn(needle, text, needle)
 
 
