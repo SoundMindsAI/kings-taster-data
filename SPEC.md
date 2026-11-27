@@ -124,11 +124,11 @@ King's Taster loads only the skill it needs. A normal check reads a few short fi
   and `iocs.json` are read from disk by code, never loaded whole.
 - There are two routines, each one line pointing to a skill: a daily list refresh, and one weekly health check
   (§4D). The weekly health check covers the conformance rerun and the routing check, so the self-check, the conformance rerun and the routing check share one weekly run instead of three separate ones. Both routines are silent unless something changed for the user.
-- **Caching:** the list is sharded (§6.5), so the cache is keyed on the manifest hash and each shard's SHA-256.
-  The manifest and the cached shards are kept until a new signed manifest appears. The bot compares the signed
-  `latest.json` and manifest hashes before downloading anything, and refetches a cached shard only if its
+- **Caching:** the list is sharded (§6.5), so the cache will be keyed on the manifest hash and each shard's SHA-256.
+  The manifest and the cached shards will be kept until a new signed manifest appears. The bot will compare the signed
+  `latest.json` and manifest hashes before downloading anything, and will refetch a cached shard only if its
   SHA-256 in the new manifest changed.
-  Package and repo verdicts may be reused within 24 hours for the same name and version and the same manifest
+  Package and repo verdicts may be reused within 24 hours for the same name and version, with the same manifest
   hash and shard SHA-256, showing the original date. Block and Unknown are never reused. Links are never cached. The RDAP bootstrap
   file is cached for 7 days.
 - A normal check loads 2,000 words or fewer and never loads `kings-taster-build`.
@@ -219,14 +219,14 @@ the bot to checklist mode, and a pass must clear it.
    your X account, so anyone can see that this account uses King's Taster." The draft then goes through the
    pre-send block (§10.1) and "OK to send?". On a yes, it posts and gives you the live link to the reply. If
    the post fails, it says "Not sent" with the reason, and runs step 3 instead.
-3. **On a decline, "not now" or no answer,** it runs a private, read-only check: it reads the official thread
+3. **On a decline, "not now" or no answer,** it runs a read-only check: it reads the official thread
    post through the X connection's read tools and reports "X connection works (read-only check)" or the
    failure. Nothing is posted.
 4. **Once per install.** It records `connectivity_done` in `~/.kings-taster/state.json` and never offers the
    check again by itself. No routine, health check or other bot can start it. You can ask for it again later,
    and that goes through the same steps.
-5. A posted reply counts as one report toward the per-install report limits. It carries no finding data and is
-   never counted as a threat report.
+5. A posted reply counts as one report toward the per-install report limits (3 a day, 10 a week, and 1 per item
+   per week). It carries no finding data and is never counted as a threat report.
 
 The fixed texts and test cases for these steps are in the `connectivity` section of `conformance.json`.
 
@@ -284,7 +284,7 @@ A full build from a live fetch of the sources on 2026-11-26 was 196 MB, or 7.2 M
 entries, which is too much for a bot to download for every check. Those figures come from that live build, not
 from the recorded test fixtures in this repo, which are a different snapshot. Each release therefore also splits
 the list into shards. The full `iocs.json` stays in every release for the pipeline and for anyone who wants the
-whole list, but a bot downloads only the shard it needs.
+whole list, but a bot will download only the shard it needs.
 
 - **Groups.** Each entry belongs to one group, read from the prefix of its `match_key`: `npm`, `pypi`, `kev`
   (CVE entries), `domain`, `url`, `ip`, `hash` or `repo_owner`.
@@ -297,15 +297,15 @@ whole list, but a bot downloads only the shard it needs.
   `generated_at` and `tag` as the rest of the release.
 - **Signed manifest.** `manifest.json` lists every shard's name, file, group, bucket, SHA-256, size, gzipped size,
   entry count, revocation count and entry count per type, plus totals per group and per type. It is signed like
-  the other release files, and `latest.json` gives its SHA-256 and size. Shards are not signed one by one: each is
-  pinned by its SHA-256 in the signed manifest. That keeps a release under GitHub's limit of 1,000 assets per
-  release.
-- **What the bot fetches.** The bot verifies `latest.json` and `manifest.json`, works out the one shard for the
-  item from its `match_key`, downloads it, and checks its SHA-256, size and entry counts against the manifest
-  before using it. It caches shards as described in §4B.
+  the other release files, and `latest.json` gives its SHA-256 and size. Shards are not signed one by one. Instead,
+  each shard's SHA-256 is listed in the signed manifest, so a changed shard is caught. That keeps a release under
+  [GitHub's limit of 1,000 assets per release](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases#storage-and-bandwidth-quotas).
+- **What the bot fetches.** The bot will verify `latest.json` and `manifest.json`, work out the one shard for the
+  item from its `match_key`, download it, and check its SHA-256, size and entry counts against the manifest
+  before using it. It will cache shards as described in §4B.
 - **Caps.** The manifest is at most 5 MB, and each shard at most 5 MB gzipped (gzip level 9). The build and the
-  validator refuse anything over a cap, and a client rejects it as `check_failed`. If a shard ever nears its
-  cap, that group's prefix length is raised. In a later live build that day (238,548 entries), the manifest
+  validator refuse anything over a cap, and a client will reject it as `check_failed`. If a shard ever nears its
+  cap, that group's prefix length will be raised. In a later live build that day (238,548 entries), the manifest
   was 122 KB, npm shards were 34 to 40 KB gzipped (802 to 958 entries each), PyPI shards were 2 to 4 KB
   gzipped, and the `kev` shard was 57 KB gzipped.
 - **Privacy.** Fetching a shard shows GitHub only the item's group and a hash bucket shared by many items,
@@ -456,8 +456,8 @@ does: X sees the account that posts it.
 
 **Reports are the only finding data that leaves.** The only other post King's Taster can make is the optional,
 one-time connectivity reply (§4D). It carries no finding data and goes through the same steps below. Its only
-allowed text is `KT x.y.z is live and checking`, with the running template version: the pre-send block refuses
-any other text, including any added word, and there is no override. Every report goes through these steps:
+allowed text is `KT x.y.z is live and checking`, where x.y.z is the running template version. The pre-send block
+refuses any other text, including any added word, and there is no override. Every report goes through these steps:
 
 1. **The pre-send block.** A report is built only from the fixed fields of the reply template: the marker line,
    the item type, the defanged item, the result, the source name and date, and one source link. A fixed

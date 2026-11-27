@@ -41,11 +41,11 @@ OpenSSH signature (`.sig`, Ed25519, namespace `kings-taster`):
 | `conformance.json` | test cases (data only) for checkers and checklist runs |
 | `stats.json` | counts only, for the public page |
 
-The release also holds the list split into 518 shards (`shard-npm-00.json` to `shard-npm-ff.json`, the same for
+Each release also holds the list split into shards, 518 of them for now (`shard-npm-00.json` to `shard-npm-ff.json`, the same for
 `pypi`, and one shard each for `kev`, `domain`, `url`, `ip`, `hash` and `repo_owner`). npm and PyPI entries go to
-the shard named by the first byte of the SHA-256 of their `match_key`. Shards have no `.sig` of their own: each
-one is pinned by its SHA-256 in the signed `manifest.json`. A bot downloads only the shard it needs, so GitHub
-sees only a hash bucket shared by many items. See [SPEC.md §6.5](SPEC.md#65-sharding).
+the shard named by the first byte of the SHA-256 of their `match_key`. Shards have no `.sig` of their own. Instead,
+each shard's SHA-256 is listed in the signed `manifest.json`, so a changed shard is caught. A bot will download
+only the shard it needs, so GitHub sees only a hash bucket shared by many items. See [SPEC.md §6.5](SPEC.md#65-sharding).
 
 Fixed download URLs:
 `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and
