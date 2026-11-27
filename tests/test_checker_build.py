@@ -50,7 +50,7 @@ class TestWording(unittest.TestCase):
             "Never say \"safe\"", "~/.kings-taster/findings/", "~/.kings-taster/state.json",
             "SPEC.md §10.1", "weekly",
             "next_page_token", "partial page set", "the list file and RDAP still run",
-            "a link-reputation source", "Checklist mode still verifies",
+            "a link-reputation source", "Checklist mode still verifies", "https://api.osv.dev/v1/query",
             "source_build_required", "lookalike", "health.json",
         ):
             self.assertIn(needle, text, needle)
@@ -75,13 +75,44 @@ class TestCanonicalize(unittest.TestCase):
         vectors = B.canonicalization_vectors()
         self.assertEqual(len(vectors), 33)
         for v in vectors:
-            got = canon(B.decode_c_escapes(v["input"]))
+            got = canon(B.decode_c_escapes(v["input"]), strict=False)
             self.assertEqual(got.encode("latin-1"), B.decode_c_escapes(v["expected"]), v["input"])
 
     def test_credits_google(self):
         code = B.snippet("canonicalize_url")
         self.assertIn("CC-BY 4.0", code)
         self.assertIn("https://developers.google.com/safe-browsing/v4/urls-hashing", code)
+
+    def test_vectors_strict_default(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        refused = 0
+        for v in B.canonicalization_vectors():
+            raw = B.decode_c_escapes(v["input"])
+            try:
+                got = canon(raw)
+            except ValueError:
+                refused += 1
+                self.assertTrue(re.search(rb"[\x00-\x20]|%20", raw), v["input"])
+                continue
+            self.assertEqual(got.encode("latin-1"), B.decode_c_escapes(v["expected"]), v["input"])
+        self.assertEqual(refused, 4)
+
+    def test_vectors_pass_non_strict(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        for v in B.canonicalization_vectors():
+            got = canon(B.decode_c_escapes(v["input"]), strict=False)
+            self.assertEqual(got.encode("latin-1"), B.decode_c_escapes(v["expected"]), v["input"])
+
+    def test_qa_host_confusion_is_refused(self):
+        canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
+        for bad in (
+            "http://evil.com\\@192.0.2.1/", "http://evil.com%5c@192.0.2.1/", "http://evil.com%5C@192.0.2.1/",
+            "http://evil.com%255c@192.0.2.1/", "javascript:alert(1)", "http:/evil.com/x",
+            "http:evil.com/x", "https:///evil.com/x", "http:///", "ftp://example.com/",
+            "http://exa\x01mple.com/", "http://exa mple.com/", "http://evil.com%2f@192.0.2.1/",
+        ):
+            with self.assertRaises(ValueError, msg=bad):
+                canon(bad)
 
     def test_userinfo_is_removed(self):
         canon = B.load_snippet("canonicalize_url")["canonicalize_url"]
@@ -147,6 +178,130 @@ class TestHelper(unittest.TestCase):
 
     def test_decode_c_escapes(self):
         self.assertEqual(B.decode_c_escapes("a\\tb\\r\\n\\x01\\x80"), b"a\tb\r\n\x01\x80")
+
+
+class TestArgvAndValidation(unittest.TestCase):
+    def test_shell_probes_never_reach_a_shell(self):
+        url = "http://x.example/a;echo INJECTED-RAN;#"
+        with self.assertRaises(B.Refused):
+            B.check_argv("link", url=url)
+        for ok in (url.replace(" ", "%20"), "http://x.example/a;echo;#"):
+            argv = B.check_argv("link", url=ok)
+            self.assertIsInstance(argv, list)
+            self.assertEqual(argv.count("--url=" + ok), 1)
+        for bad in ("left-pad$(echo SUBST-RAN)", "a;b", "a b", "`x`", "a|b", "../x"):
+            with self.assertRaises(B.Refused, msg=bad):
+                B.validate_package(bad, "1.0.0", "npm")
+            with self.assertRaises(B.Refused, msg=bad):
+                B.check_argv("package", name=bad, version="1.0.0", ecosystem="npm")
+
+    def test_package_rules(self):
+        self.assertEqual(B.validate_package("left-pad", "1.3.0", "npm"), ("left-pad", "1.3.0"))
+        self.assertEqual(B.validate_package("@scope/pkg", "1.0", "npm")[0], "@scope/pkg")
+        self.assertEqual(B.validate_package("Foo_Bar", "2.0+x", "PyPI")[1], "2.0+x")
+        for name, ver, eco in (("x", "1;2", "npm"), ("x", "", "npm"), ("x", "$(id)", "npm"),
+                               ("x", "1", "gem"), ("-x", "1", "PyPI"), ("x" * 215, "1", "npm")):
+            with self.assertRaises(B.Refused, msg=(name, ver, eco)):
+                B.validate_package(name, ver, eco)
+        argv = B.check_argv("package", name="left-pad", version="1.3.0", ecosystem="npm")
+        self.assertEqual(argv[:5], ["python3", "-I", "-s", B.CHECKER, "check"])
+        self.assertIn("--name=left-pad", argv)
+
+    def test_repo_rules(self):
+        self.assertEqual(B.validate_repo("Owner/re.po_1"), "Owner/re.po_1")
+        for bad in ("a", "a/b/c", "a/", "/b", "a/b;c", "a/$(x)", "../b", "a/..", "a/" + "b" * 101, 5):
+            with self.assertRaises(B.Refused, msg=bad):
+                B.validate_repo(bad)
+        self.assertEqual(B.check_argv("repo", name="o/r")[-1], "--name=o/r")
+
+    def test_url_rules(self):
+        self.assertEqual(B.validate_url("HTTP://Evil.com:80/a/../b#f"), "http://evil.com/b")
+        for bad in ("ftp://x.example/", "javascript:alert(1)", "http://x.example/'a", 'http://x.example/"',
+                    "http://x.example/a\x01", "http://x.example/a b", "http://x.example/\n",
+                    "http://evil.com\\@192.0.2.1/", "http://evil.com%5c@192.0.2.1/", "https:///evil.com/x",
+                    "http:/evil.com/x", "http:evil.com/x", 7):
+            with self.assertRaises(B.Refused, msg=bad):
+                B.validate_url(bad)
+            with self.assertRaises(B.Refused, msg=bad):
+                B.check_argv("link", url=bad)
+        with self.assertRaises(B.Refused):
+            B.check_argv("other")
+
+    def test_skill_states_the_rules(self):
+        text = B.skill_text()
+        for needle in ("valid_package_name", "as an argv list with no shell", "Never put them into a shell string",
+                       "^[A-Za-z0-9._-]{1,100}$", "^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$",
+                       "^[A-Za-z0-9._+-]{1,64}$", "If `canonicalize_url` refuses, the check is Unknown (`injection_seen`)."):
+            self.assertIn(needle, text, needle)
+
+
+class TestKeys(unittest.TestCase):
+    def test_domain_and_ip_keys(self):
+        self.assertEqual(B.link_match_keys("http://Example.COM/a"),
+                         [common.match_key("url", "http://example.com/a"), common.match_key("domain", "example.com")])
+        keys = B.link_match_keys("http://3279880203/blah")
+        self.assertEqual(keys, [common.match_key("url", "http://195.127.0.11/blah"),
+                                common.match_key("ip", "195.127.0.11"), common.match_key("domain", "195.127.0.11")])
+
+    def test_skill_requires_domain_and_ip(self):
+        text = B.skill_text()
+        for needle in ("`url-sha256:`, the `domain:` key", "`ip:` key", "the lookalike-name check",
+                       "add none of your own"):
+            self.assertIn(needle, text, needle)
+
+
+class TestOsvPin(unittest.TestCase):
+    def test_pinned_endpoint_and_fail_closed(self):
+        text = B.skill_text()
+        for needle in ("`POST https://api.osv.dev/v1/query` only", "Never use querybatch",
+                       "Require HTTP 200 and the exact effective URL `https://api.osv.dev/v1/query`",
+                       "Accept `{}` as zero vulns (clean) only when that status and URL are confirmed.",
+                       "A missing, unreadable or unconfirmed status file, a non-200, or a wrong URL "
+                       "(including `/v1/querybatch`) is `injection_seen`.",
+                       "`http_status` and `response_sha256`", "at most 20 pages", "^[A-Za-z0-9_-]{1,256}$",
+                       "A 403 or 429 is `rate_limited`", "A non-2xx response is a failed source."):
+            self.assertIn(needle, text, needle)
+        self.assertNotIn("OSV batch", text)
+
+
+class TestVerifierAndFetch(unittest.TestCase):
+    def test_verifier_exception_and_steps(self):
+        text = B.skill_text()
+        self.assertNotIn("openssl", text.lower())
+        self.assertIn("except the official list verifier already in this repo: `scripts/verify.sh` or "
+                      "`python3 -E -s -m kt.verify`", text)
+        for needle in ("-I kings-taster-current", "-I kings-taster-next", "`file_type`", "`keys.json`",
+                       "`root_pins`", "64 KiB", "`--state`", "`--update-state`"):
+            self.assertIn(needle, text, needle)
+
+    def test_no_redirect_and_effective_host(self):
+        text = B.skill_text()
+        for needle in ("no-redirect opener", "host-allowlist check", "as an argv list with no shell",
+                       "exactly one redirect", "require the effective host to be `github.com` or "
+                       "`release-assets.githubusercontent.com`", "is `injection_seen` (Unknown)."):
+            self.assertIn(needle, text, needle)
+
+    def test_full_sentences(self):
+        text = B.skill_text()
+        for s in ("A canary passes only when `canary_ok` is exactly True; a missing result is not a pass.",
+                  "Never treat a partial page set as clean.",
+                  "Checklist mode still verifies the list with the same verifier.",
+                  "An unverifiable list is Unknown (`unverified_list`)."):
+            self.assertIn(s, text, s)
+        self.assertNotIn("same verifier; an unverifiable", text)
+
+    def test_lows(self):
+        text = B.skill_text()
+        for needle in ("`GOOGLE_ATTRIBUTION` and `GOOGLE_NOTICE`", "`google-notice` block",
+                       "`kt.common.defang`", "`schema/finding-record.schema.json`",
+                       "`conformance.json`; `conformance/cases.json` is the in-repo development copy",
+                       "local directory of saved fixture files", "discard any partial verdict",
+                       "mode 0o600"):
+            self.assertIn(needle, text, needle)
+        code = B.snippet("canonicalize_url")
+        self.assertIn('"URLs and Hashing"', code)
+        self.assertIn("(Safe Browsing APIs (v4)), CC-BY 4.0", code)
+        self.assertIn("The live lookup is v5", code)
 
 
 if __name__ == "__main__":

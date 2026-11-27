@@ -7,6 +7,7 @@ prove they work. It is not a downloaded checker and never contacts the network.
 import json
 import os
 import re
+from kt import common
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SKILL_PATH = os.path.join(ROOT, "skills", "kings-taster-build.md")
@@ -85,3 +86,89 @@ def decode_c_escapes(s):
 def canonicalization_vectors():
     with open(CASES_PATH, encoding="utf-8") as f:
         return json.load(f)["canonicalization_vectors"]["vectors"]
+
+
+class Refused(ValueError):
+    """An untrusted value was refused: the check is Unknown (injection_seen)."""
+
+
+PKG_NAME = re.compile(r"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$")
+PKG_VER = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
+REPO_PART = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+ECOSYSTEMS = ("npm", "PyPI")
+CHECKER = "~/.kings-taster/checker.py"
+_cache = {}
+
+
+def _snip(name):
+    if name not in _cache:
+        _cache[name] = load_snippet(name)
+    return _cache[name]
+
+
+def canonical_url(url):
+    """Run the skill's canonicalize_url; it raises ValueError when it refuses."""
+    return _snip("canonicalize_url")["canonicalize_url"](url)
+
+
+def validate_package(name, version, ecosystem):
+    if ecosystem not in ECOSYSTEMS:
+        raise Refused("ecosystem")
+    if not isinstance(name, str) or not isinstance(version, str):
+        raise Refused("type")
+    if not PKG_NAME.fullmatch(name) or not PKG_VER.fullmatch(version):
+        raise Refused("name or version")
+    if not common.valid_package_name(ecosystem, name):
+        raise Refused("package name")
+    return name, version
+
+
+def validate_repo(owner_repo):
+    if not isinstance(owner_repo, str) or owner_repo.count("/") != 1:
+        raise Refused("repo")
+    owner, repo = owner_repo.split("/")
+    for side in (owner, repo):
+        if not REPO_PART.fullmatch(side) or side in (".", ".."):
+            raise Refused("repo")
+    return owner_repo
+
+
+def validate_url(url):
+    """Return the canonical URL, or raise Refused."""
+    if not isinstance(url, str) or not re.match(r"(?i)https?://", url):
+        raise Refused("scheme")
+    if any(c in url for c in "'\"`") or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        raise Refused("quote or control character")
+    try:
+        return canonical_url(url)
+    except ValueError as e:
+        raise Refused(str(e))
+
+
+def link_match_keys(url):
+    """url-sha256, domain and (for an IP host) ip keys from a canonical http(s) URL."""
+    canon = validate_url(url)
+    mk = _snip("match_key")["match_key"]
+    host = re.match(r"^https?://([^/?]*)", canon).group(1)
+    keys = [mk("url", canon)]
+    if re.fullmatch(r"[0-9]{1,3}(\.[0-9]{1,3}){3}", host):
+        keys.append(mk("ip", host))
+    try:
+        keys.append(mk("domain", host))
+    except UnicodeError:
+        raise Refused("host")
+    return keys
+
+
+def check_argv(item_type, name=None, version=None, ecosystem=None, url=None):
+    """Return the checker command as an argv list (never a shell string)."""
+    base = ["python3", "-I", "-s", CHECKER, "check", "--type=" + item_type]
+    if item_type == "package":
+        validate_package(name, version, ecosystem)
+        return base + ["--ecosystem=" + ecosystem, "--name=" + name, "--version=" + version]
+    if item_type == "repo":
+        return base + ["--name=" + validate_repo(name)]
+    if item_type == "link":
+        validate_url(url)
+        return base + ["--url=" + url]
+    raise Refused("type")

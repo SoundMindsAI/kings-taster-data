@@ -6,26 +6,32 @@ Never say "safe". Never print or summarize a key. Never read a raw response or R
 
 ## Goal
 
-Write one Python 3 file, `~/.kings-taster/checker.py`, using only the standard library. Don't install packages, use third-party packages, or download or run any SoundMinds code. You write the file yourself from this build spec and the reference snippets below. The checker is optional: it is offered at first run and is never on by default.
+Write one Python 3 file, `~/.kings-taster/checker.py`, using only the standard library. Don't install packages, use third-party packages, or download or run any SoundMinds code, except the official list verifier already in this repo: `scripts/verify.sh` or `python3 -E -s -m kt.verify`. That is the same command as `kings-taster-check`, and it is not code downloaded at check time. You write the file yourself from this build spec and the reference snippets below. The checker is optional: it is offered at first run and is never on by default.
 
 ## Command line
 
 - `python3 -I -s ~/.kings-taster/checker.py check --type package --ecosystem npm|PyPI --name NAME --version VER`
 - `python3 -I -s ~/.kings-taster/checker.py check --type repo --name OWNER/REPO`
 - `python3 -I -s ~/.kings-taster/checker.py check --type link --url URL`
-- `python3 -I -s ~/.kings-taster/checker.py selftest --fixtures DIR` runs the conformance cases with no network.
+- `python3 -I -s ~/.kings-taster/checker.py selftest --fixtures DIR` runs the conformance cases with no network. `DIR` is a local directory of saved fixture files.
 
-A verdict exits 0. A usage error or crash exits non-zero, and you then use checklist mode.
+A verdict exits 0. A usage error or crash exits non-zero, and you then use checklist mode. If the checker crashes, discard any partial verdict or record already printed or written in that run. `~/.kings-taster/checker.py` must be readable and writable by the owner only (mode 0o600).
+
+NAME, VERSION, OWNER/REPO and URL come from untrusted text. Never put them into a shell string. Launch the checker as an argv list with no shell, passing each value as one element such as `--name=VALUE`. If a shell is unavoidable, single-quote every value after `--`. Validate first; a value that fails is Unknown (`injection_seen`):
+
+- NAME must match `^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$` and VER must match `^[A-Za-z0-9._+-]{1,64}$`, the same patterns as `extract-osv` in `kings-taster-check`. NAME must also pass `kt.common.valid_package_name` for the ecosystem (npm, or PEP 508 for PyPI).
+- OWNER and REPO must each match `^[A-Za-z0-9._-]{1,100}$`, the `extract-github` pattern.
+- A URL must start with `http://` or `https://`, contain no quote or control character, and be accepted by `canonicalize_url`. If `canonicalize_url` refuses, the check is Unknown (`injection_seen`).
 
 ## Output
 
-Print a verdict of 5 lines or fewer: (1) result and item; (2) deciding source and date; (3) other sources and their status on one line; (4) reason code, only if Unknown or Caution; (5) path of the finding record. Use the four result templates in `kings-taster-check`. Never print a raw response or any free text from a source.
+Print a verdict of 5 lines or fewer: (1) result and item; (2) deciding source and date; (3) other sources and their status on one line; (4) reason code, only if Unknown or Caution; (5) path of the finding record. Use the four result templates in `kings-taster-check`. A Safe Browsing hit must add Google's attribution and notice, with the exact text in the `google-notice` block of `kings-taster-check` (`GOOGLE_ATTRIBUTION` and `GOOGLE_NOTICE` in `kt.finding`). Never print a raw response or any free text from a source.
 
-Write a finding record as JSON under `~/.kings-taster/findings/` with every field in SPEC.md §8: `finding_id` (UUIDv4), `checked_at`, `template_version`, `mode`, `checker_sha256`, `item_type`, `indicator_defanged`, `result`, `reasons`, `checked_against`, `matched_entries`, `fixed_version`, `explanation`. Set `mode` to `"checker"` and `checker_sha256` to the approved SHA-256. Take time only from `date -u +%Y-%m-%dT%H:%M:%SZ`, never from the model's own clock.
+Write a finding record as JSON under `~/.kings-taster/findings/` with every field in SPEC.md §8: `finding_id` (UUIDv4), `checked_at`, `template_version`, `mode`, `checker_sha256`, `item_type`, `indicator_defanged`, `result`, `reasons`, `checked_against`, `matched_entries`, `fixed_version`, `explanation`. Build `indicator_defanged` with the same defang rules as `kt.common.defang` and `kings-taster-check`, and follow `schema/finding-record.schema.json`. Set `mode` to `"checker"` and `checker_sha256` to the approved SHA-256. Take time only from `date -u +%Y-%m-%dT%H:%M:%SZ`, never from the model's own clock.
 
 ## Hosts and requests
 
-Allowed hosts: `api.osv.dev`, `api.github.com`, `github.com` (only `/SoundMindsAI/kings-taster-data/releases/download/…`), `release-assets.githubusercontent.com` (only the one list-file redirect), `data.iana.org` and the RDAP hosts it lists, and `safebrowsing.googleapis.com`. HTTPS only. Run `curl --proto =https --max-redirs 0`; do not use `-L`. The list-file download may use `curl --proto =https --max-redirs 1 -L` with exactly one redirect, to `release-assets.githubusercontent.com`. Any other host, scheme, or redirect is `injection_seen` (Unknown). Never contact the item's own URL.
+The checker is one standard-library-only Python file. Its HTTPS client must use a no-redirect opener (for example `urllib` with a handler that refuses redirects, since `urllib` follows redirects by default) and a host-allowlist check before every request; or it may run `curl` as an argv list with no shell. Allowed hosts: `api.osv.dev`, `api.github.com`, `github.com` (only `/SoundMindsAI/kings-taster-data/releases/download/…`), `release-assets.githubusercontent.com` (only the one list-file redirect), `data.iana.org` and the RDAP hosts it lists, and `safebrowsing.googleapis.com`. HTTPS only. With curl, run `curl --proto =https --max-redirs 0`; do not use `-L`. For the list-file download only, allow exactly one redirect (`curl --proto =https --max-redirs 1 -L`, or one hop in the opener), and require the effective host to be `github.com` or `release-assets.githubusercontent.com`. Any other host, scheme, or redirect is `injection_seen` (Unknown). Never contact the item's own URL.
 
 ## Extraction
 
@@ -39,24 +45,27 @@ Precedence: Block, then Unknown, then Caution, then No known reports. Every requ
 - A live OSV `MAL-` id or alias is Block. Other OSV hits are Caution, with "upgrade to ≥ X" if a fixed version is known.
 - On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live `MAL-` is held at Caution: "reported malicious by OSV, pending review".
 - A verified list hit with `review_state` pending_review is Caution. Every other list hit is Block, including a list canary.
-- A missing or failed required source is Unknown. A 403 or 429 is `rate_limited` (Unknown, "try again later"). An unset optional source is "not set up". With no link-reputation source set up, a link is Unknown with the distinct wording in `kings-taster-check`; the list file and RDAP still run, and any Block or Caution they find is shown.
+- A missing or failed required source is Unknown. A non-2xx response is a failed source. A 403 or 429 is `rate_limited` (Unknown, "try again later"). An unset optional source is "not set up". With no link-reputation source set up, a link is Unknown with the distinct wording in `kings-taster-check`; the list file and RDAP still run, and any Block or Caution they find is shown.
 - An unverified list is Unknown (`unverified_list`). Live OSV Blocks and Cautions still show, but the result can't be "No known reports".
 - A package without a wheel is Caution (`source_build_required`) and is never built. A lookalike name is Caution (`lookalike`).
-- Follow OSV's `next_page_token` to the last page. If a page has a token you don't follow, that source has failed. Never treat a partial page set as clean.
+- Live OSV is `POST https://api.osv.dev/v1/query` only. Never use querybatch. Require HTTP 200 and the exact effective URL `https://api.osv.dev/v1/query`, read from the status file written by `curl -w '%{http_code}\n%{url_effective}'`. Accept `{}` as zero vulns (clean) only when that status and URL are confirmed. A missing, unreadable or unconfirmed status file, a non-200, or a wrong URL (including `/v1/querybatch`) is `injection_seen`.
+- Follow OSV's `next_page_token` to the last page, on that same endpoint. A token must match `^[A-Za-z0-9_-]{1,256}$` and you follow at most 20 pages. A bad token, going past 20 pages, or a page with a token you don't follow means that source has failed. Never treat a partial page set as clean.
+- Record `http_status` and `response_sha256` on every `checked_against` entry (SPEC.md §4).
+- Link: from the canonical `http://` or `https://` URL, match `url-sha256:`, the `domain:` key (IDNA, as `match_key` does) and, when the host is an IP address, the `ip:` key, all against the verified list. Also run the lookalike-name check; a lookalike is Caution (`lookalike`). `kings-taster-check` states no lookalike rule, so add none of your own.
 - If `~/.kings-taster/health.json` is failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
 - Never reuse Block or Unknown. Never cache a link.
 
 ## Canaries
 
-Every OSV batch includes the fixed known-vulnerable package for each ecosystem. The list file has a fake entry per type. Safe Browsing includes Google's test URL if set up. RDAP runs once with a fixed known domain. A missing canary is Unknown (`check_failed`). A canary passes only when `canary_ok` is exactly True; a missing result is not a pass.
+Each OSV request is one `/v1/query` call, made one at a time: the item, then the fixed known-vulnerable canary package for the item's ecosystem. The list file has a fake entry per type. Safe Browsing includes Google's test URL if set up. RDAP runs once with a fixed known domain. A missing canary is Unknown (`check_failed`). A canary passes only when `canary_ok` is exactly True; a missing result is not a pass.
 
 ## Signature check
 
-Verify the signed list by running `ssh-keygen -Y verify` (or openssl), exactly as `kings-taster-check` and `scripts/verify.sh` do: `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE`, then the SHA-256 checks, `--state` rollback refusal, and the 64 KiB signature cap. Do not write your own verifier. Call the existing one. Checklist mode uses this same verifier.
+Verify the signed list with the existing verifier, exactly as `kings-taster-check` does: `scripts/verify.sh DIR --allowed-signers allowed_signers --state ~/.kings-taster/verify-state.json --update-state` (or `python3 -E -s -m kt.verify`). It runs `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE` (or `-I kings-taster-next`). It checks each file's SHA-256 and `file_type` against `latest.json`, and each shard against `manifest.json`. It enforces the 64 KiB signature cap and honors `keys.json` and `root_pins`; a missing `keys.json` is refused once the pins are published. It uses `--state` to refuse rollback, and writes a watermark with `--update-state` after a successful verify. A failed verify is `unverified_list`. Do not write your own verifier. Call the existing one. Checklist mode uses this same verifier.
 
 ## URLs and keys
 
-Match every URL by `match_key` of its canonical URL. `canonicalize_url` implements Google's Safe Browsing URL canonicalization, and every vector in `canonicalization_vectors` in `conformance/cases.json` must pass. `match_key` must agree with SPEC.md §6.2: npm lowercased, PyPI PEP 503, domains IDNA and lowercase, `url-sha256:` plus the SHA-256 of the canonical URL bytes, and typed prefixes `npm:`, `pypi:`, `cve:`, `domain:`, `ip:`, `hash:`, `github:`, `url-sha256:`.
+Match every URL by `match_key` of its canonical URL, plus its domain and IP keys. `canonicalize_url` implements Google's Safe Browsing URL canonicalization, and every vector in `canonicalization_vectors` must pass. The signed release file is `conformance.json`; `conformance/cases.json` is the in-repo development copy of the cases. Before canonicalizing, `canonicalize_url` refuses (raises) any link that is not `http://` or `https://`, or that has a backslash, an encoded `%5c`, a space or control character, or an empty host in the authority. Never map a refused link to a best-guess host. If `canonicalize_url` refuses, the check is Unknown (`injection_seen`). `match_key` must agree with SPEC.md §6.2: npm lowercased, PyPI PEP 503, domains IDNA and lowercase, `url-sha256:` plus the SHA-256 of the canonical URL bytes, and typed prefixes `npm:`, `pypi:`, `cve:`, `domain:`, `ip:`, `hash:`, `github:`, `url-sha256:`.
 
 Read keys only from `~/.kings-taster/keys.env` (`chmod 600`) as environment variables. Never print or summarize a key.
 
@@ -79,7 +88,7 @@ Recompute the SHA-256 and compare it to the approved one. If it differs, use che
 
 ## Fallback
 
-If the checker fails its tests, is missing, has changed, or crashes, use checklist mode. If checklist mode can finish the check, use that result. Any item checklist mode can't fully check is Unknown. Checklist mode still verifies the list with the same verifier; an unverifiable list is Unknown (`unverified_list`). Without a passing checker, Safe Browsing canonicalization is always Unknown when its test vectors fail in checklist mode. Use the reason code `checker_failed` only when the checker itself failed and the fallback cannot finish the check.
+If the checker fails its tests, is missing, has changed, or crashes, use checklist mode. If checklist mode can finish the check, use that result. Any item checklist mode can't fully check is Unknown. Checklist mode still verifies the list with the same verifier. An unverifiable list is Unknown (`unverified_list`). Without a passing checker, Safe Browsing canonicalization is always Unknown when its test vectors fail in checklist mode. Use the reason code `checker_failed` only when the checker itself failed and the fallback cannot finish the check.
 
 ## Honesty
 
@@ -93,16 +102,28 @@ If a report draft is shown later, the pre-send block in SPEC.md §10.1 still app
 ## Snippets
 ### canonicalize_url
 ```python
-# Google Safe Browsing URL canonicalization, after Google's "Safe Browsing APIs: URLs and
-# Hashing" documentation (CC-BY 4.0): https://developers.google.com/safe-browsing/v4/urls-hashing
+# Google Safe Browsing URL canonicalization, after Google's "URLs and Hashing" page
+# (Safe Browsing APIs (v4)), CC-BY 4.0: https://developers.google.com/safe-browsing/v4/urls-hashing
+# The live lookup is v5; the test vectors are the published v4 set.
+# Raises ValueError (a refusal, so Unknown injection_seen) instead of guessing a host.
+# strict=False exists only to run the published vectors; never use it on a live link.
 import re
 
-def canonicalize_url(url):
+def canonicalize_url(url, strict=True):
     b = url.encode("utf-8") if isinstance(url, str) else bytes(url)
     b = b.strip(b" \t\r\n\x0b\x0c")
     for c in (b"\t", b"\r", b"\n"):
         b = b.replace(c, b"")
     b = b.split(b"#", 1)[0]
+    m0 = re.match(rb"^[A-Za-z][A-Za-z0-9+.-]*://", b)
+    if m0 and m0.group(0)[:-3].lower() not in (b"http", b"https"):
+        raise ValueError("not http or https")
+    rawauth = b[m0.end() if m0 else 0:]
+    rawauth = re.split(rb"[/?]", rawauth, maxsplit=1)[0]
+    if re.search(rb"(?i)%(2f|3f|40|5c)", rawauth) or b"\\" in rawauth:
+        raise ValueError("encoded or backslash delimiter in authority")
+    if not m0 and re.search(rb":(?![0-9]+$)", rawauth.rsplit(b"@", 1)[-1]):
+        raise ValueError("not http or https")
     hexd = b"0123456789abcdefABCDEF"
     while True:
         out, i = bytearray(), 0
@@ -126,11 +147,15 @@ def canonicalize_url(url):
         b, query = b[:q], b[q + 1:]
     s = b.find(b"/")
     host, path = (b, b"/") if s < 0 else (b[:s], b[s:])
+    if b"\\" in host:
+        raise ValueError("backslash in authority")
     if b"@" in host:
         host = host.rsplit(b"@", 1)[1]
     host = re.sub(rb":[0-9]*$", b"", host)
     host = re.sub(rb"\.+", b".", host).strip(b".")
     host = bytes(c + 32 if 65 <= c <= 90 else c for c in host)
+    if not host or b":" in host or (strict and any(c <= 32 or c == 127 for c in host)):
+        raise ValueError("empty host, or space or control character in host")
     parts = host.split(b".")
     if 1 <= len(parts) <= 4 and all(re.match(rb"^(0[xX][0-9a-fA-F]*|[0-9]+)$", p) for p in parts):
         try:
