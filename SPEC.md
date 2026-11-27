@@ -56,12 +56,18 @@ as "not set up".
 
 **Precedence.** Every check runs, and the answer is the worst one: **Block, then Unknown, then Caution, then
 No known reports.** A Block or Caution found anywhere is always shown, even when the overall answer is Unknown.
+The one exception is a live OSV malicious hit when the popular-name list that applies can't be read or is
+empty: the hit is still shown, but the overall answer is Unknown, because popularity can't be decided and
+the popular-name hold can't be applied (see §3.3).
 An unverifiable list file makes the overall answer Unknown; live OSV Blocks and Cautions still show, and
 "No known reports" is impossible.
 
 **Live OSV rule.** `MAL-` IDs and their aliases count as malicious (Block). Everything else counts as
 vulnerable (Caution, "upgrade to X or later"). A live malicious hit on a popular (top-10k) name is held at
 **Caution: "reported malicious by OSV, pending review"** until the list file carries an approved entry.
+If the popular-name list that applies can't be read or is empty, a live malicious hit is not a Block and is
+not held at Caution; the hit is still shown, and the answer is Unknown. This is the one case where a live
+OSV Block becomes Unknown.
 
 | Answer | Fixed wording (the voice may change, the meaning may not) |
 |---|---|
@@ -90,20 +96,20 @@ IP), RDAP (servers from the IANA bootstrap file only), a lookalike-name check, a
 link-reputation source. With no link-reputation source set up, the answer is Unknown with the distinct wording
 above; the list file and RDAP still run, and any Block or Caution they find is shown.
 
-**The lookalike-name check.** It needs no network and gives the same answer every time. Names are lowercased as ASCII, then put in their usual canonical form (npm lowercase, PyPI per PEP 503). Each name is compared with every name in `config/popular/`, npm and PyPI together. Those lists are the only names compared, and if they can't be read, or are empty, the check is Unknown (`check_failed`), even when a live source reports a malicious hit on a name that would otherwise have been a Block or held at Caution.
+**The lookalike-name check.** It needs no network and gives the same answer every time. Names are lowercased as ASCII, then put in their usual canonical form (npm lowercase, PyPI per PEP 503). Those lists in `config/popular/` are the only names compared. A package is compared only with its own ecosystem's list (npm or PyPI). A repo or a link is compared with both lists together. If the list that applies can't be read or is empty, the check is Unknown (`check_failed`). This is the one case where a live OSV Block becomes Unknown: the hit is still shown, but the answer is Unknown until the list can be read, because popularity can't be decided and the popular-name hold can't be applied.
 
 - For a package, the canonical name is compared as a whole. A scoped npm name (`@scope/pkg`) is also compared without its scope (`pkg`).
 - For a repo, the lowercase owner and the lowercase repo name are compared separately.
 - For a link, each dot-separated label of the canonical host is compared except the right-most label (the top-level domain). A link with an IP host is skipped. A link the canonicalizer refuses is skipped, because the refusal already gives Unknown. This avoids needing the Public Suffix List, and it still catches a typo in the main name or in a subdomain label.
 
-A label is skipped if it is exactly a popular name, or if it has a character that is not ASCII. Otherwise the label is a lookalike of a popular name when either rule holds:
+A name or label is skipped if it is exactly a popular name, or if it has a character that is not ASCII. Otherwise it is a lookalike of a popular name when either rule holds:
 
 1. Distance: the label and the popular name are both at least 5 characters long, and they are one edit apart. An edit is one insertion, one deletion, one substitution, or one swap of two neighbouring characters.
 2. Confusable fold: the popular name is at least 5 characters long, and the label and the popular name differ as written but are equal after the fold. The fold is, in this order: replace `0` with `o`; replace `1` with `l`; then repeat replacing `rn` with `m` and `vv` with `w` until neither is left. There are no other substitutions.
 
 An ordinary word that is one edit from a popular package name is flagged too, for example the host label of `moments.com`.
 
-If several popular names match, the first in alphabetical order is named. A lookalike is a Caution with reason `lookalike`, never a Block: "Caution. <label> looks like the popular name <popular>, from the lookalike-name check (<date>)." It can turn "No known reports" into a Caution, and it never changes a Block or an Unknown. The date comes from the same clock as the rest of the check.
+If several popular names match, the first in alphabetical order is named. A lookalike is a Caution with reason `lookalike`, never a Block: "Caution. <label> looks like the popular name <popular>, from the lookalike-name check (<date>)." A lookalike can turn "No known reports" into a Caution, but the lookalike flag never changes a Block or an Unknown. The date comes from the same clock as the rest of the check.
 
 ## 4. Checklist mode (default): fixed commands
 

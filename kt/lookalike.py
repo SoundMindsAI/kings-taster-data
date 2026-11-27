@@ -79,15 +79,25 @@ def popular_union(root=None):
     return frozenset(name for _, name in check._popular_names(root))
 
 
-def _package_labels(item):
-    from .common import normalize_package
+def _package_parts(item):
+    """(canonical ecosystem or None, name) from the item fields or the npm:/pypi: indicator."""
     eco, name = item.get("ecosystem"), item.get("name")
     if not (eco and name):
         m = _PKG_IND.match(item.get("indicator_defanged") or "")
         if not m:
-            return []
+            return None, None
         eco, name = m.group(1), m.group(2)
-    eco = {"npm": "npm", "pypi": "PyPI"}.get(str(eco).lower())
+    return {"npm": "npm", "pypi": "PyPI"}.get(str(eco).lower()), name
+
+
+def package_ecosystem(item):
+    """"npm", "PyPI", or None for a package item."""
+    return _package_parts(item)[0]
+
+
+def _package_labels(item):
+    from .common import normalize_package
+    eco, name = _package_parts(item)
     if eco is None:
         return []
     canon = normalize_package(eco, name)
@@ -134,7 +144,12 @@ def labels_for(item):
 def check(item, root=None):
     """Return {"class": "clean"}, {"class": "lookalike", "label", "match"} or {"class": "check_failed"}."""
     try:
-        popular = popular_union(root)
+        eco = package_ecosystem(item) if item.get("item_type") == "package" else None
+        if eco:
+            from . import check as _check
+            popular = _check.popular_for(eco, root)  # a package uses only its own list
+        else:
+            popular = popular_union(root)  # repo and link use both lists
     except (OSError, ValueError):
         return {"class": "check_failed"}
     for label in labels_for(item):

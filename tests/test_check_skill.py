@@ -90,6 +90,8 @@ class TestSkillCaps(unittest.TestCase):
             "Reply in 5 lines or fewer",
             'package|repo|link "$INDICATOR"',
             "class clean|lookalike|check_failed",
+            "An unreadable or empty list is Unknown (`check_failed`)",
+            "plus `label` and `match` when it flags",
         ):
             self.assertIn(needle, text, needle)
         # The connectivity reply belongs to first-run, not this skill.

@@ -187,38 +187,52 @@ def host_allowed(host, url_path="", list_redirect=False):
     return True
 
 
-_POPULAR_DEFAULT = None
+_POPULAR_FILES = {"npm": "npm.txt", "PyPI": "pypi.txt"}
+_POPULAR_DEFAULT = {}  # ecosystem -> frozenset of canonical names, default ROOT only
+
+# Choice B (pending Eric). True: a live OSV MAL- is Unknown for every name when
+# the applicable popular list can't be used. Set False for choice A: also append
+# malicious_match (Block wins) and keep check_failed and the recorded hit.
+OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED = True
 
 
 def clear_popular_cache():
     """Forget the cached default lists so the next call re-reads config/popular/."""
-    global _POPULAR_DEFAULT
-    _POPULAR_DEFAULT = None
+    _POPULAR_DEFAULT.clear()
 
 
-def _read_popular(root):
+def _read_popular_eco(eco, root):
+    """Canonical names from one ecosystem's list. OSError if unreadable, ValueError if empty."""
     names = set()
-    for eco, fname in (("npm", "npm.txt"), ("PyPI", "pypi.txt")):
-        path = os.path.join(root, "config", "popular", fname)
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                names.add((eco, normalize_package(eco, line)))
+    path = os.path.join(root, "config", "popular", _POPULAR_FILES[eco])
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            names.add(normalize_package(eco, line))
     if not names:
-        raise ValueError("popular lists are empty")
+        raise ValueError("popular list is empty: %s" % _POPULAR_FILES[eco])
     return frozenset(names)
 
 
-def _popular_names(root=None):
-    """Popular names for root. Only the default ROOT lists are cached; a custom root is re-read."""
-    global _POPULAR_DEFAULT
+def popular_for(eco, root=None):
+    """Names on one ecosystem's list ("npm" or "PyPI"). Only the default ROOT is cached."""
     if root is not None:
-        return _read_popular(root)
-    if _POPULAR_DEFAULT is None:
-        _POPULAR_DEFAULT = _read_popular(ROOT)
-    return _POPULAR_DEFAULT
+        return _read_popular_eco(eco, root)
+    if eco not in _POPULAR_DEFAULT:
+        _POPULAR_DEFAULT[eco] = _read_popular_eco(eco, ROOT)
+    return _POPULAR_DEFAULT[eco]
+
+
+def _popular_names(root=None):
+    """Union of both lists as (ecosystem, name) pairs; fails if either list fails."""
+    if root is not None:
+        return frozenset((eco, n) for eco in _POPULAR_FILES for n in popular_for(eco, root))
+    if "union" not in _POPULAR_DEFAULT:
+        _POPULAR_DEFAULT["union"] = frozenset(
+            (eco, n) for eco in _POPULAR_FILES for n in popular_for(eco))
+    return _POPULAR_DEFAULT["union"]
 
 
 def _canonical_ecosystem(ecosystem):
@@ -241,9 +255,9 @@ def is_popular(ecosystem, name, root=None):
     eco = _canonical_ecosystem(ecosystem)
     if eco is None:
         return False
-    names = _popular_names(root)  # an unreadable or empty list raises; it is not "not popular"
+    names = popular_for(eco, root)  # an unreadable or empty list raises; it is not "not popular"
     try:
-        return (eco, normalize_package(eco, name)) in names
+        return normalize_package(eco, name) in names
     except ValueError:
         return False
 
@@ -353,11 +367,17 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
     # Always consult config/popular/; there is no way to bypass a listed name.
     popular_failed = False
     popular = False
+    reasons = []
     try:
-        _popular_names()  # load first so an unreadable or empty list fails for every item type
+        eco = LK.package_ecosystem(item) if item_type == "package" else None
+        if eco:
+            popular_for(eco)  # a package needs only its own ecosystem's list
+        else:
+            _popular_names()  # repo, link, other: both lists must be usable
         popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
     except (OSError, ValueError):
         popular_failed = True  # an unknown popular status never turns a hit into a Block
+        reasons.append("check_failed")
     if health and health.get("status") == "failing":
         reason = health.get("reason") or "failed"
         explanation = ("Unknown. I couldn't finish the check: health check failing: %s. "
@@ -375,8 +395,8 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
         return rec, lines
 
     checked = []
-    reasons = []
     matched = []
+    osv_note = None
     fixed = None
     deciding = None  # (rank, source, date, snippet)
     no_link = False
@@ -430,8 +450,12 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
                 hit = next((h for h in hits if h.get("kind") == "malicious"), {"id": "MAL", "date": date})
                 url = "https://osv.dev/vulnerability/%s" % hit["id"]
                 if popular_failed:
-                    if "check_failed" not in reasons:
-                        reasons.append("check_failed")
+                    # check_failed is already in reasons. The hit is still recorded and shown.
+                    matched.append(_match(hit["id"], url, "osv"))
+                    osv_note = ("OSV.dev reports this as malicious (%s, %s), but the popular-name list could not be read."
+                                % (url, date))
+                    if not OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED:
+                        reasons.append("malicious_match")  # choice A: Block wins
                 elif popular:
                     reasons.append("pending_review")
                     matched.append(_match(hit["id"], url, "osv"))
@@ -565,6 +589,8 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
         explanation = ("Unknown. I couldn't finish the check: %s. Don't proceed until it can be checked." % which)
         if deciding and deciding[3].startswith("Caution."):
             explanation = "%s %s" % (explanation, deciding[3])
+        if osv_note:
+            explanation = "%s %s" % (explanation, osv_note)
     elif result == "caution":
         explanation = deciding[3] if deciding else (
             "Caution. A required source reported a concern, from OSV.dev (https://osv.dev/vulnerability/OSV, %s)." % _date10(now))
@@ -577,7 +603,7 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
 
     rec = _record(item, checked, result, reasons, explanation, now, template_version, finding_id,
                   matched=matched, fixed=fixed)
-    lines = _verdict_lines(rec, deciding, finding_path)
+    lines = _verdict_lines(rec, deciding, finding_path, osv_note if result == "unknown" else None)
     return rec, lines
 
 
@@ -647,7 +673,7 @@ def _record(item, sources, result, reasons, explanation, now, template_version, 
     return rec
 
 
-def _verdict_lines(rec, deciding, finding_path):
+def _verdict_lines(rec, deciding, finding_path, note=None):
     result = rec["result"]
     label = {"block": "Block", "caution": "Caution", "unknown": "Unknown",
              "no_known_reports": "No known reports"}[result]
@@ -666,6 +692,8 @@ def _verdict_lines(rec, deciding, finding_path):
     lines = [line1, line2, line3]
     if result == "unknown" and deciding and deciding[3].startswith("Caution."):
         lines.append(deciding[3])
+    elif note:
+        lines.append(note)
     elif result in ("unknown", "caution") and rec["reasons"]:
         lines.append("Reason: %s" % ", ".join(rec["reasons"]))
     lines.append(finding_path)

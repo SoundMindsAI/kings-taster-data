@@ -321,7 +321,7 @@ class TestKeys(unittest.TestCase):
         text = B.skill_text()
         for needle in ("`url-sha256:`, the `domain:` key", "`ip:` key", "SPEC.md §3.3 also requires a lookalike-name check",
                        "Apply the same rule `kings-taster-check` states, offline, with `python3 -E -s -m kt.lookalike`",
-                       "do not write a second algorithm"):
+                       "Don't write a second algorithm"):
             self.assertIn(needle, text, needle)
         self.assertNotIn("Leave it out", text)
 

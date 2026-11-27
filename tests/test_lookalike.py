@@ -59,6 +59,8 @@ class TestMatchLabel(unittest.TestCase):
     def test_negatives(self):
         self.clean("lodash")        # exact popular name
         self.clean("lodashxx")      # distance 2
+        self.clean("ldoahs")        # same length, distance 2 (two transpositions)
+        self.clean("lodaxx")        # same length, distance 2 (two substitutions)
         self.clean("unrelated")
         self.clean("")
         self.clean("lodash-é")      # non-ASCII is skipped
@@ -120,9 +122,13 @@ class TestCheckWithFixtureList(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         hit = L.check(_pkg("zebra-pkh"), root=tmp.name)
         self.assertEqual(hit, {"class": "lookalike", "label": "zebra-pkh", "match": "zebra-pkg"})
-        # PyPI names are canonical (PEP 503) and compared across ecosystems.
-        self.assertEqual(L.check(_pkg("quokka-lib"), root=tmp.name), {"class": "clean"})
-        self.assertEqual(L.check(_pkg("quokka-lob"), root=tmp.name)["match"], "quokka-lib")
+        # PyPI names are canonical (PEP 503); a package is compared only with its own ecosystem's list.
+        self.assertEqual(L.check(_pkg("quokka-lib", "pypi"), root=tmp.name), {"class": "clean"})
+        self.assertEqual(L.check(_pkg("quokka-lob", "pypi"), root=tmp.name)["match"], "quokka-lib")
+        self.assertEqual(L.check(_pkg("quokka-lob"), root=tmp.name), {"class": "clean"})  # npm item, PyPI-only name
+        self.assertEqual(L.check(_pkg("zebra-pkh", "pypi"), root=tmp.name), {"class": "clean"})  # PyPI item, npm-only name
+        link = {"item_type": "link", "indicator_defanged": "hxxps://quokka-lob[.]example/"}
+        self.assertEqual(L.check(link, root=tmp.name)["match"], "quokka-lib")  # a link uses both lists
         self.assertEqual(L.check(_pkg("lodsah"), root=tmp.name), {"class": "clean"})  # not in this fixture
 
     def test_missing_popular_dir_is_check_failed(self):
@@ -137,7 +143,7 @@ class TestCheckWithFixtureList(unittest.TestCase):
             L.popular_union(tmp.name)
 
     def test_first_label_that_matches_is_reported(self):
-        tmp = _root(npm="moment\nwebpack\n")
+        tmp = _root(npm="moment\nwebpack\n", pypi="flask\n")  # a link needs both lists
         self.addCleanup(tmp.cleanup)
         item = {"item_type": "link", "indicator_defanged": "hxxps://rnoment[.]webpakc[.]example/"}
         self.assertEqual(L.check(item, root=tmp.name)["label"], "rnoment")
@@ -151,8 +157,11 @@ class TestRealPopularList(unittest.TestCase):
             self.assertEqual(res, {"class": "lookalike", "label": label, "match": match}, label)
 
     def test_exact_popular_and_unrelated_are_clean(self):
-        for name in ("lodash", "requests", "reac", "unrelated-name-xyz"):
+        for name in ("lodash", "reac", "unrelated-name-xyz"):
             self.assertEqual(L.check(_pkg(name)), {"class": "clean"}, name)
+        self.assertEqual(L.check(_pkg("requests", "pypi")), {"class": "clean"})  # exact name on the PyPI list
+        # "requests" is only on the PyPI list, so as an npm name it is one edit from npm "request".
+        self.assertEqual(L.check(_pkg("requests")), {"class": "lookalike", "label": "requests", "match": "request"})
 
     def test_popular_union_has_both_ecosystems(self):
         names = L.popular_union()
@@ -204,22 +213,35 @@ class TestDecideWiring(unittest.TestCase):
 class TestDecideWithBadList(unittest.TestCase):
     """An unreadable or empty popular list makes the check Unknown (SPEC.md §3.3)."""
 
-    def _decide(self, root_files, name, osv):
+    def _decide(self, root_files, name, osv, eco="npm", item_type="package", indicator=None):
+        """root_files: None (no dir), one text for both files, or {"npm.txt": text|None, "pypi.txt": text|None}."""
         old_root = C.ROOT
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 if root_files is not None:
                     d = os.path.join(tmp, "config", "popular")
                     os.makedirs(d)
-                    for fname in ("npm.txt", "pypi.txt"):
-                        with open(os.path.join(d, fname), "w", encoding="utf-8") as f:
-                            f.write(root_files)
+                    files = root_files if isinstance(root_files, dict) else {
+                        "npm.txt": root_files, "pypi.txt": root_files}
+                    for fname, text in files.items():
+                        if text is not None:  # None leaves the file missing
+                            with open(os.path.join(d, fname), "w", encoding="utf-8") as f:
+                                f.write(text)
                 C.ROOT = tmp
                 C.clear_popular_cache()
-                item = dict(_pkg(name), ecosystem="npm", name=name, version="1.0.0")
-                sources = [TestDecideWiring()._src("osv", osv),
-                           dict(TestDecideWiring()._src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}),
-                                verified=True)]
+                if item_type == "package":
+                    item = dict(_pkg(name, eco), ecosystem="npm" if eco == "npm" else "PyPI", name=name, version="1.0.0")
+                else:
+                    item = {"item_type": item_type, "indicator_defanged": indicator}
+                src = TestDecideWiring()._src
+                listed = dict(src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}), verified=True)
+                if item_type == "package":
+                    sources = [src("osv", osv), listed]
+                elif item_type == "repo":
+                    sources = [src("github_api", {"class": "clean"}), listed]
+                else:
+                    sources = [listed, src("rdap", {"class": "ok", "registration": "2020-01-01"}),
+                               src("safe_browsing", {"class": "clean"})]
                 return C.decide(item, sources, now=NOW, template_version="1.0.0", finding_id=FID)[0]
         finally:
             C.ROOT = old_root
@@ -237,13 +259,114 @@ class TestDecideWithBadList(unittest.TestCase):
         self.assertEqual(rec["result"], "unknown")
         self.assertIn("check_failed", rec["reasons"])
 
+    OSV_LINE = ("OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-1, 2026-11-26), "
+                "but the popular-name list could not be read.")
+
+    def _assert_choice_b_unknown(self, rec):
+        self.assertEqual(rec["result"], "unknown")
+        self.assertIn("check_failed", rec["reasons"])
+        self.assertNotIn("malicious_match", rec["reasons"])
+        self.assertNotIn("pending_review", rec["reasons"])
+        self.assertTrue(rec["explanation"].startswith("Unknown. I couldn't finish the check: "))
+        self.assertIn("Don't proceed until it can be checked.", rec["explanation"])
+        self.assertIn(self.OSV_LINE, rec["explanation"])
+        self.assertIn("osv:MAL-2026-1", [m["id"] for m in rec["matched_entries"]])
+
     def test_unreadable_list_with_live_mal_hit_is_unknown_not_block(self):
-        for files in (None, "# comments only\n"):
+        # Choice B: popular or not, a live MAL- hit is Unknown when the applicable list can't be used.
+        for name in ("lodash", "zzqx-widget"):
+            for files in (None, "# comments only\n"):
+                with self.subTest(name=name, files=files):
+                    self._assert_choice_b_unknown(self._decide(files, name, self.MAL))
+
+    def test_mal_hit_verdict_shows_the_osv_line(self):
+        item = dict(_pkg("lodash"), ecosystem="npm", name="lodash", version="1.0.0")
+        old_root = C.ROOT
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                C.ROOT = tmp
+                C.clear_popular_cache()
+                src = TestDecideWiring()._src
+                _, lines = C.decide(item, [src("osv", self.MAL), dict(src("kings_taster_list", {
+                    "class": "clean", "hits": [], "list_hits": 0}), verified=True)],
+                    now=NOW, template_version="1.0.0", finding_id=FID)
+        finally:
+            C.ROOT = old_root
+            C.clear_popular_cache()
+        self.assertLessEqual(len(lines), 5)
+        self.assertIn(self.OSV_LINE, lines)
+
+    def test_flag_false_is_choice_a_block_wins(self):
+        old = C.OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED
+        C.OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED = False
+        try:
+            rec = self._decide(None, "lodash", self.MAL)
+        finally:
+            C.OSV_MAL_IS_UNKNOWN_IF_POPULAR_LIST_FAILED = old
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("check_failed", rec["reasons"])
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertIn("osv:MAL-2026-1", [m["id"] for m in rec["matched_entries"]])
+
+    def test_check_failed_is_added_even_if_lookalike_check_says_clean(self):
+        # N5: decide() itself records check_failed; it must not depend on kt.lookalike.check.
+        old = C.LK.check
+        C.LK.check = lambda item, root=None: {"class": "clean"}
+        try:
+            for files in (None, "# comments only\n"):
+                rec = self._decide(files, "unrelated-name-xyz", {"class": "clean"})
+                self.assertEqual(rec["result"], "unknown")
+                self.assertIn("check_failed", rec["reasons"])
+        finally:
+            C.LK.check = old
+
+    GOOD = "lodash\nmoment\n"
+    EMPTY = "# comments only\n"
+
+    def test_only_own_list_matters_for_a_package(self):
+        # npm ok, pypi missing or comment-only
+        for pypi in (None, self.EMPTY):
+            files = {"npm.txt": self.GOOD, "pypi.txt": pypi}
+            rec = self._decide(files, "unrelated-name-xyz", {"class": "clean"})
+            self.assertEqual(rec["result"], "no_known_reports", pypi)
+            self.assertNotIn("check_failed", rec["reasons"])
             rec = self._decide(files, "lodash", self.MAL)
+            self.assertEqual(rec["result"], "caution")
+            self.assertIn("pending_review", rec["reasons"])
+            rec = self._decide(files, "unrelated-name-xyz", {"class": "clean"}, eco="pypi")
             self.assertEqual(rec["result"], "unknown")
             self.assertIn("check_failed", rec["reasons"])
-            self.assertNotIn("malicious_match", rec["reasons"])
-            self.assertNotIn("pending_review", rec["reasons"])
+            for kind, ind in (("repo", "github:unrelated-owner/unrelated-repo"),
+                              ("link", "hxxps://unrelated-site[.]example/")):
+                rec = self._decide(files, None, {"class": "clean"}, item_type=kind, indicator=ind)
+                self.assertIn("check_failed", rec["reasons"], kind)
+                self.assertEqual(rec["result"], "unknown", kind)
+
+    def test_only_own_list_matters_for_a_pypi_package(self):
+        # pypi ok, npm missing or comment-only
+        for npm in (None, self.EMPTY):
+            files = {"npm.txt": npm, "pypi.txt": "requests\nflask\n"}
+            rec = self._decide(files, "unrelated-name-xyz", {"class": "clean"}, eco="pypi")
+            self.assertEqual(rec["result"], "no_known_reports", npm)
+            rec = self._decide(files, "requests", self.MAL, eco="pypi")
+            self.assertEqual(rec["result"], "caution")
+            self.assertIn("pending_review", rec["reasons"])
+            rec = self._decide(files, "unrelated-name-xyz", {"class": "clean"})
+            self.assertEqual(rec["result"], "unknown")
+            self.assertIn("check_failed", rec["reasons"])
+            rec = self._decide(files, None, {"class": "clean"}, item_type="repo",
+                               indicator="github:unrelated-owner/unrelated-repo")
+            self.assertEqual(rec["result"], "unknown")
+
+    def test_lookalike_check_per_list(self):
+        tmp = _root(npm="lodash\n", pypi="# nothing\n")
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(L.check(_pkg("lodsah"), root=tmp.name)["match"], "lodash")
+        self.assertEqual(L.check(_pkg("lodsah", "pypi"), root=tmp.name), {"class": "check_failed"})
+        self.assertEqual(L.check({"item_type": "repo", "indicator_defanged": "github:x/y"},
+                                 root=tmp.name), {"class": "check_failed"})
+        self.assertEqual(L.check({"item_type": "link", "indicator_defanged": "hxxps://x[.]com/"},
+                                 root=tmp.name), {"class": "check_failed"})
 
     def test_readable_list_mal_hit_popular_is_caution_else_block(self):
         rec, _ = TestDecideWiring()._decide(dict(_pkg("lodash"), ecosystem="npm", name="lodash", version="1.0.0"), self.MAL)
@@ -309,9 +432,14 @@ class TestSpecAndBuildSkill(unittest.TestCase):
         for needle in ("The lookalike-name check.", "except the right-most label",
                        "replace `0` with `o`; replace `1` with `l`; then repeat replacing `rn` with `m` and `vv` with `w`"):
             self.assertIn(needle, flat)
-        for needle in ("Those lists are the only names compared, and if they can't be read, or are empty, "
-                       "the check is Unknown (`check_failed`), even when a live source reports a malicious hit "
-                       "on a name that would otherwise have been a Block or held at Caution.",
+        for needle in ("Those lists in `config/popular/` are the only names compared.",
+                       "A package is compared only with its own ecosystem's list (npm or PyPI).",
+                       "A repo or a link is compared with both lists together.",
+                       "If the list that applies can't be read or is empty, the check is Unknown (`check_failed`).",
+                       "This is the one case where a live OSV Block becomes Unknown",
+                       "the lookalike flag never changes a Block or an Unknown",
+                       "A lookalike can turn \"No known reports\" into a Caution",
+                       "A name or label is skipped if",
                        "An ordinary word that is one edit from a popular package name is flagged too, "
                        "for example the host label of `moments.com`."):
             self.assertIn(needle, flat)

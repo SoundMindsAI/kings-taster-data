@@ -256,6 +256,11 @@ class TestConformanceCases(unittest.TestCase):
                     self.assertIn(reason, rec["reasons"])
                 for reason in exp["reasons_exclude"]:
                     self.assertNotIn(reason, rec["reasons"])
+                for text in exp.get("explanation_includes", []):
+                    self.assertIn(text, rec["explanation"])
+                matched_ids = [m["id"] for m in rec["matched_entries"]]
+                for mid in exp.get("matched_ids_include", []):
+                    self.assertIn(mid, matched_ids)
                 if "budget" in exp:
                     self.assertLessEqual(len(lines), exp["budget"]["max_verdict_lines"])
                 ran += 1

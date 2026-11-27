@@ -1424,13 +1424,13 @@
     "kings_taster_list": "verified"
    },
    "expected": {
-    "result": "caution",
-    "reasons_include": [
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
      "lookalike"
-    ],
-    "reasons_exclude": []
+    ]
    },
-   "note": "Every item type is compared with the union of both popular lists."
+   "note": "A package is compared only with its own ecosystem's list: a PyPI name near an npm-only name is not flagged."
   },
   {
    "id": "lookalike-pkg-exact-popular",
@@ -1491,6 +1491,26 @@
     ]
    },
    "note": "Two edits is too far."
+  },
+  {
+   "id": "lookalike-pkg-distance-2-ldoahs",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:ldoahs@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "Same length as lodash and two edits away, so it is not flagged."
   },
   {
    "id": "lookalike-pkg-unrelated",
@@ -1979,9 +1999,78 @@
     "reasons_exclude": [
      "malicious_match",
      "pending_review"
+    ],
+    "explanation_includes": [
+     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "but the popular-name list could not be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
     ]
    },
    "note": "Without the popular list a live MAL- hit is neither Block nor held at Caution."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-mal-hit-not-popular",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:zzqx-widget@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "malicious_match",
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "but the popular-name list could not be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
+    ]
+   },
+   "note": "Popularity can't be decided, so even a non-popular name with a live MAL- hit is Unknown."
+  },
+  {
+   "id": "lookalike-popular-list-empty-mal-hit-not-popular",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:zzqx-widget@1.0.0"
+   },
+   "setup": {
+    "popular_list": "empty",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "malicious_match",
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "but the popular-name list could not be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
+    ]
+   },
+   "note": "An empty popular list behaves like an unreadable one for a non-popular name too."
   },
   {
    "id": "lookalike-popular-list-empty-mal-hit",
@@ -2003,6 +2092,13 @@
     "reasons_exclude": [
      "malicious_match",
      "pending_review"
+    ],
+    "explanation_includes": [
+     "OSV.dev reports this as malicious (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "but the popular-name list could not be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
     ]
    },
    "note": "An empty popular list behaves like an unreadable one."
