@@ -54,7 +54,7 @@ def gzip_size(b):
 
 
 def looks_like_shard_filename(name):
-    """True for shard-*.json and for hidden or differently cased variants (.shard-*, SHARD-*, Shard-*)."""
+    """True if the name starts with shard- after an optional leading dot, in any case and with any extension (for example shard-foo.txt, .shard-kev.json, SHARD-kev.json)."""
     if not isinstance(name, str) or not name or name in (".", ".."):
         return False
     base = name[1:] if name.startswith(".") else name

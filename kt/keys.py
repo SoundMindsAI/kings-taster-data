@@ -64,7 +64,7 @@ def _options_ok(options):
 
 
 def load_root_pins(path):
-    """Return the pin lines (principal, public key). Empty if only comments, which is the unpublished state."""
+    """Return the pin lines as (principal, public key, fingerprint) tuples. Empty if only comments, which is the unpublished state."""
     keys = []
     seen = set()
     with open(path, encoding="utf-8") as f:
