@@ -13,7 +13,7 @@ each citing its sources and their dates. It never says "safe".
 ## 1. Design rules
 
 - **No SoundMinds server.** Each installed bot asks official sources directly and checks this repo's signed
-  list file. Nothing is sent to SoundMinds.
+  list file. Nothing is sent to SoundMinds unless you choose to report something to us.
 - **Strict answers.** Never "safe" or "guaranteed". A clean answer is "No known reports, checked against
   <sources> on <date>". Every verdict cites a source and a date. Any failed check means
   "Unknown, don't proceed".
