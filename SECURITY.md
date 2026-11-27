@@ -13,7 +13,7 @@ Through GitHub's private vulnerability reporting:
 
 Or by email to support@soundminds.ai, with "Security" in the subject line. This works without a GitHub account.
 
-Either way, only you and SoundMinds can see the report. Please don't open a public issue or pull request for a
+Either way, the report isn't posted anywhere public. Please don't open a public issue or pull request for a
 security flaw, and don't include real secrets or anyone's personal data in the report.
 
 ## What's in scope
