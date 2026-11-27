@@ -93,8 +93,11 @@ jobs:
           if [ "$MODE" = "previous" ]; then args+=(--previous work/prev); fi
           rc=0
           python3 -E -s -m kt.health "${args[@]}" || rc=$?
-          if [ "$rc" -eq 2 ]; then echo "pipeline health: hold for review"; exit 0; fi
-          exit "$rc"
+          case "$rc" in
+            0) ;;
+            10) echo "::warning::pipeline health: hold for review"; exit 0 ;;
+            *) exit "$rc" ;;
+          esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kt-release-unsigned

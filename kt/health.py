@@ -9,15 +9,19 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 
-from .common import ECO_PREFIX, parse_time, read_json, sha256_bytes, utc_now
-from .shards import gzip_size, looks_like_shard_filename
+from .common import ECO_PREFIX, match_key, parse_time, read_json, sha256_bytes, utc_now
+from .shards import looks_like_shard_filename
 from .validate import CANARY_TYPES, FUTURE_SKEW_SECONDS, validate_release_dir
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SILENT_SOURCES = ("cisa-kev", "osv-npm", "osv-pypi")
 DEFAULT_GAPS = {"cisa-kev": 14, "osv-npm": 3, "osv-pypi": 3}
 SIZE_JUMP_RATIO = 0.5
+EXIT_OK = 0
+EXIT_FAIL = 1
+EXIT_HOLD = 10  # distinct from argparse's usage-error status (2)
 
 
 def source_of(entry_id):
@@ -40,16 +44,6 @@ def _shard_paths(release_dir):
         if looks_like_shard_filename(name) and os.path.isfile(os.path.join(release_dir, name)):
             names.append(name)
     return names
-
-
-def _file_sha(path):
-    with open(path, "rb") as f:
-        return sha256_bytes(f.read())
-
-
-def _gzip_of(path):
-    with open(path, "rb") as f:
-        return gzip_size(f.read())
 
 
 def _add(report, name, status, detail):
@@ -122,8 +116,6 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
                 _add(report, "build", "fail", "hash/size mismatch: %s" % ", ".join(mismatch[:8]))
             else:
                 _add(report, "build", "ok", "%d shards match the manifest" % len(listed))
-        # close any leftover? we used open().read() without with - ResourceWarning!
-        # I'll fix by using _file_sha only... I already used open().read() above. Fix in a patch if tests warn.
     else:
         _add(report, "build", "ok", "shard files not required for this run")
 
@@ -134,13 +126,21 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
         _add(report, "dates", "fail", "generated_at is missing or not a UTC time")
         generated = None
     if generated is not None:
+        date_ok = False
         if (generated - now).total_seconds() > FUTURE_SKEW_SECONDS:
             _add(report, "dates", "fail", "generated_at is in the future")
-        elif require_shards and generated.date() != now.date():
-            # Strict "today" on the daily build and when shards are checked.
-            # The hourly watchdog uses require_shards=False and only the future/age checks.
+        elif require_shards and not signed and generated.date() != now.date():
+            # Strict "today" only for the daily (unsigned) build, as SPEC.md §7.5 says.
             _add(report, "dates", "fail", "generated_at is not today's date")
+        elif signed:
+            hours = int(cfg.get("alert_after_hours", 26))
+            if (now - generated).total_seconds() > hours * 3600:
+                _add(report, "dates", "fail", "generated_at is older than %d hours" % hours)
+            else:
+                date_ok = True
         else:
+            date_ok = True
+        if date_ok:
             stale = []
             for e in iocs.get("entries") or []:
                 try:
@@ -166,8 +166,16 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
         else:
             have.add(typ)
     missing_c = sorted(CANARY_TYPES - have)
+    expected_keys = _expected_canary_keys(root)
+    listed_keys = set()
+    for e in iocs.get("entries") or []:
+        if e.get("canary") and isinstance(e.get("match_key"), str):
+            listed_keys.add(e["match_key"])
+    missing_keys = sorted(expected_keys - listed_keys)
     if missing_c:
         _add(report, "canaries", "fail", "missing canary types: %s" % ", ".join(missing_c))
+    elif missing_keys:
+        _add(report, "canaries", "fail", "canary match_key mismatch")
     else:
         _add(report, "canaries", "ok", "list canaries present for %s" % ", ".join(sorted(have)))
 
@@ -217,7 +225,7 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
             continue
         gap = gaps[sid]
         last = newest[sid]
-        if last is not None and (now - last).days > gap:
+        if last is not None and (now - last).total_seconds() > gap * 86400:
             silent.append("%s added nothing for more than %d days (last new entry %s)"
                           % (sid, gap, last.strftime("%Y-%m-%d")))
     if silent:
@@ -254,17 +262,39 @@ def check_release(release_dir, previous_dir=None, *, now=None, signed=False,
     return _finalize(report)
 
 
+def _expected_canary_keys(root):
+    """match_key values of the fixed list canaries in config/canaries.json."""
+    path = os.path.join(root, "config", "canaries.json")
+    try:
+        doc = read_json(path)
+    except (OSError, ValueError):
+        return set()
+    keys = set()
+    for e in doc.get("list") or []:
+        if not isinstance(e, dict) or "type" not in e or "value" not in e:
+            continue
+        try:
+            keys.add(match_key(e["type"], e["value"], e.get("ecosystem")))
+        except (KeyError, ValueError, TypeError):
+            continue
+    return keys
+
+
 def _size_jumps(release_dir, manifest, previous_dir, prev_manifest, ratio):
-    def totals(directory, mani):
+    """Compare gzip_bytes from the manifests. Shard files need not be on disk
+    (the production previous dir holds only the signed pointer files)."""
+    def totals(mani):
         files = {}
         for s in mani.get("shards") or []:
-            path = os.path.join(directory, s["file"])
-            if os.path.isfile(path):
-                files[s["name"]] = _gzip_of(path)
+            if not isinstance(s, dict):
+                continue
+            name, gz = s.get("name"), s.get("gzip_bytes")
+            if name and isinstance(gz, int):
+                files[name] = gz
         return files, sum(files.values())
 
-    cur_files, cur_total = totals(release_dir, manifest)
-    prev_files, prev_total = totals(previous_dir, prev_manifest)
+    cur_files, cur_total = totals(manifest)
+    prev_files, prev_total = totals(prev_manifest)
     jumps = []
     if prev_total > 0 and cur_total > prev_total * (1 + ratio):
         jumps.append("total gzip size jumped from %d to %d" % (prev_total, cur_total))
@@ -286,10 +316,22 @@ def _finalize(report):
 
 
 def write_report(path, report):
+    """Write the report via a temp file and rename. Does not follow a symlink at path."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2, sort_keys=True)
-        f.write("\n")
+    fd, tmp = tempfile.mkstemp(prefix=".health.", suffix=".tmp",
+                               dir=os.path.dirname(os.path.abspath(path)) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, sort_keys=True)
+            f.write("\n")
+            f.flush()
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def main(argv=None):
@@ -303,22 +345,39 @@ def main(argv=None):
     ap.add_argument("--out", help="write pipeline-health.json here")
     ap.add_argument("--allowed-signers")
     ap.add_argument("--root", default=ROOT)
-    a = ap.parse_args(argv)
-    report = check_release(
-        a.release_dir, a.previous, now=a.now, signed=a.signed,
-        require_shards=not a.no_shards, allowed_signers=a.allowed_signers,
-        root=a.root,
-    )
-    out = a.out or os.path.join(a.release_dir, "pipeline-health.json")
-    write_report(out, report)
-    sys.stdout.write("%s\n" % report["status"])
-    for line in report["failed"] + report["holds"]:
-        sys.stdout.write("%s\n" % line)
-    if report["status"] == "fail":
-        return 1
-    if report["status"] == "hold":
-        return 2
-    return 0
+    out = None
+    try:
+        try:
+            a = ap.parse_args(argv)
+        except SystemExit as e:
+            # argparse uses status 2 for usage errors; that must not mean "hold".
+            return EXIT_OK if e.code in (0, None) else EXIT_FAIL
+        out = a.out or os.path.join(a.release_dir, "pipeline-health.json")
+        report = check_release(
+            a.release_dir, a.previous, now=a.now, signed=a.signed,
+            require_shards=not a.no_shards, allowed_signers=a.allowed_signers,
+            root=a.root,
+        )
+        write_report(out, report)
+        sys.stdout.write("%s\n" % report["status"])
+        for line in report["failed"] + report["holds"]:
+            sys.stdout.write("%s\n" % line)
+        if report["status"] == "fail":
+            return EXIT_FAIL
+        if report["status"] == "hold":
+            return EXIT_HOLD
+        return EXIT_OK
+    except Exception:
+        if out:
+            try:
+                write_report(out, {
+                    "status": "fail", "signed": False, "require_shards": True,
+                    "generated_at": None, "tag": None, "checks": [],
+                    "failed": ["health check crashed"], "holds": [],
+                })
+            except Exception:
+                pass
+        return EXIT_FAIL
 
 
 if __name__ == "__main__":

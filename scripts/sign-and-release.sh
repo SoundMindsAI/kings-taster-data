@@ -94,7 +94,7 @@ fi
 for f in "${FILES[@]}" build-report.json; do [ -f "$ART/$f" ] || die "artifact is missing $f"; done
 for f in "$ART"/*; do
   b="$(basename "$f")"
-  case "$b" in latest.json|iocs.json|conformance.json|stats.json|manifest.json|build-report.json) continue ;; esac
+  case "$b" in latest.json|iocs.json|conformance.json|stats.json|manifest.json|build-report.json|pipeline-health.json) continue ;; esac
   [[ "$b" =~ ^shard-(npm|pypi|kev|domain|url|ip|hash|repo_owner)(-[0-9a-f]{2})?\.json$ ]] || die "unexpected file in artifact"
 done
 
@@ -152,13 +152,14 @@ set +e
 "${PY[@]}" -m kt.health "${health_args[@]}" "${NOW_ARGS[@]}"
 health_rc=$?
 set -e
-if [ "$health_rc" -eq 1 ]; then
-  die "pipeline health check failed; not publishing"
-fi
-if [ "$health_rc" -eq 2 ]; then
-  [ "$ACCEPT_HEALTH" -eq 1 ] || die "pipeline health hold (size jump); a person must review, then rerun with --accept-health"
-  echo "sign-and-release: health hold accepted by operator"
-fi
+case "$health_rc" in
+  0) ;;
+  10)
+    [ "$ACCEPT_HEALTH" -eq 1 ] || die "pipeline health hold (size jump); a person must review, then rerun with --accept-health"
+    echo "sign-and-release: health hold accepted by operator"
+    ;;
+  *) die "pipeline health check failed (exit $health_rc); not publishing" ;;
+esac
 
 if [ "$DRY_RUN" -eq 1 ]; then
   OUT="${KT_DRY_RUN_OUT:-}"

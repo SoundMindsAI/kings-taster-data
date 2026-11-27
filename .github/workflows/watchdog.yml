@@ -40,5 +40,8 @@ jobs:
           # Shard hash checks run after the daily build and again at sign-and-release.
           rc=0
           python3 -E -s -m kt.health live --signed --no-shards --allowed-signers config/allowed_signers || rc=$?
-          if [ "$rc" -eq 2 ]; then echo "watchdog: health hold"; exit 0; fi
-          exit "$rc"
+          case "$rc" in
+            0) ;;
+            10) echo "::warning::watchdog: health hold"; exit 0 ;;
+            *) exit "$rc" ;;
+          esac

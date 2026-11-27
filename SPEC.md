@@ -400,7 +400,7 @@ signed. It checks:
 
 - **Build:** today's `latest.json`, `manifest.json` and every shard were built, with every shard's SHA-256
   matching the manifest.
-- **Signing:** at sign-and-release, the files verify against the current allowed-signers key, and the canary
+- **Signing:** at sign-and-release, the files verify against an allowed signing key, and the canary
   entries are present. The unsigned CI build checks canaries and leaves signatures to sign-and-release.
 - **No source went silent.** A source fails if its fetch failed, if it returned zero entries when it shouldn't,
   or if it added nothing for longer than its usual gap. The starting gaps are 3 days for OSV `MAL-` records and

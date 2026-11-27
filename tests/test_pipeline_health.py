@@ -167,21 +167,93 @@ class TestHealthPassAndHolds(HealthCase):
         self.assertEqual(report["status"], "fail")
         self.assertTrue(any("cisa-kev added nothing" in x for x in report["failed"]))
 
+    def _shrink_prev_manifest(self, prev):
+        man = load(os.path.join(prev, "manifest.json"))
+        for s in man["shards"]:
+            s["gzip_bytes"] = 1
+        write_canonical(os.path.join(prev, "manifest.json"), man)
+
     def test_size_jump_is_a_hold(self):
         prev = self.build("prev")
         cur = self.build("cur", now=T1, previous=prev)
         ok = self.check(cur, previous=prev, now=T1)
         self.assertEqual(ok["status"], "ok", ok["failed"] + ok["holds"])
-        # Shrink the previous shard files so today's gzip sizes look like a jump.
-        for name in os.listdir(prev):
-            if name.startswith("shard-") and name.endswith(".json"):
-                with open(os.path.join(prev, name), "wb") as f:
-                    f.write(b"{}\n")
+        # Compare gzip_bytes from the signed manifests, not on-disk shards.
+        self._shrink_prev_manifest(prev)
         report = self.check(cur, previous=prev, now=T1)
         self.assertEqual(report["status"], "hold", report)
         self.assertTrue(report["holds"])
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(H.main([cur, "--previous", prev, "--now", T1_ISO, "--root", self.root]), 2)
+            self.assertEqual(H.main([cur, "--previous", prev, "--now", T1_ISO, "--root", self.root]), H.EXIT_HOLD)
+
+    def test_size_jump_holds_when_previous_has_only_pointer_files(self):
+        prev = self.build("prev")
+        cur = self.build("cur", now=T1, previous=prev)
+        prev_ptr = os.path.join(self.tmp, "prev-ptr")
+        os.makedirs(prev_ptr)
+        for name in ("latest.json", "iocs.json", "conformance.json", "stats.json", "manifest.json"):
+            shutil.copyfile(os.path.join(prev, name), os.path.join(prev_ptr, name))
+        self._shrink_prev_manifest(prev_ptr)
+        report = self.check(cur, previous=prev_ptr, now=T1)
+        self.assertEqual(report["status"], "hold", report)
+        self.assertTrue(any("gzip size jumped" in x for x in report["holds"]))
+
+    def test_canary_wrong_match_key_is_fail(self):
+        out = self.build()
+        iocs_path = os.path.join(out, "iocs.json")
+        iocs = load(iocs_path)
+        for e in iocs["entries"]:
+            if e.get("canary"):
+                e["match_key"] = "npm:not-a-canary"
+        write_canonical(iocs_path, iocs)
+        report = self.check(out)
+        self.assertEqual(report["status"], "fail")
+        self.assertTrue(any("match_key" in x for x in report["failed"]), report["failed"])
+
+    def test_silent_gap_uses_full_elapsed_seconds(self):
+        out = self.build()
+        iocs_path = os.path.join(out, "iocs.json")
+        iocs = load(iocs_path)
+        # 3 days + 1 hour before T0: .days would be 3 (not a fail); total_seconds is.
+        almost = "2026-11-24T05:17:00Z"
+        for e in iocs["entries"]:
+            if (not e["canary"]) and e["id"].startswith("kev:"):
+                e["first_seen"] = almost
+        write_canonical(iocs_path, iocs)
+        report = self.check(out, now=T0, limits={"cisa_kev_gap_days": 3, "osv_mal_gap_days": 3})
+        self.assertEqual(report["status"], "fail", report)
+        self.assertTrue(any("cisa-kev added nothing" in x for x in report["failed"]))
+
+    def test_usage_error_is_fail_not_hold(self):
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(H.main(["--not-a-flag"]), H.EXIT_FAIL)
+            self.assertNotEqual(H.main(["--not-a-flag"]), H.EXIT_HOLD)
+
+    def test_corrupt_latest_writes_fail_report(self):
+        out = self.build()
+        with open(os.path.join(out, "latest.json"), "w") as f:
+            f.write("{not-json")
+        dest = os.path.join(self.tmp, "pipeline-health.json")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = H.main([out, "--now", T0_ISO, "--out", dest, "--root", self.root])
+        self.assertEqual(rc, H.EXIT_FAIL)
+        self.assertTrue(os.path.isfile(dest))
+        import json
+        with open(dest, encoding="utf-8") as f:
+            doc = json.loads(f.read())
+        self.assertEqual(doc["status"], "fail")
+        self.assertTrue(doc["failed"])
+
+    def test_write_report_replaces_a_symlink_at_the_path(self):
+        dest = os.path.join(self.tmp, "pipeline-health.json")
+        target = os.path.join(self.tmp, "elsewhere.json")
+        with open(target, "w") as f:
+            f.write("old\n")
+        os.symlink(target, dest)
+        H.write_report(dest, {"status": "ok", "failed": [], "holds": []})
+        self.assertFalse(os.path.islink(dest))
+        with open(target, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "old\n")
 
     def test_unsigned_signed_flag_without_sigs_is_fail(self):
         out = self.build()
@@ -242,3 +314,68 @@ class TestHealthSignAndRelease(unittest.TestCase):
             "--from-dir", self.harness.unsigned, "--dry-run", "--accept-breaker")
         self.assertEqual(rc, 0, out)
         self.assertIn("DRY RUN OK", out)
+
+    def test_sign_and_release_allows_next_utc_morning_within_age_bound(self):
+        # Built at 2026-11-27T06:17Z; signed the next UTC morning (~18 hours later).
+        rc, out = self.harness.run_script(
+            "--from-dir", self.harness.unsigned, "--dry-run", "--accept-breaker",
+            env_extra={"KT_NOW": "2026-11-28T00:30:00Z"})
+        self.assertEqual(rc, 0, out)
+        self.assertIn("DRY RUN OK", out)
+
+    def test_run_id_accepts_pipeline_health_json_in_the_artifact(self):
+        art = os.path.join(self.harness.tmp, "artifact")
+        os.makedirs(art)
+        for name in os.listdir(self.harness.unsigned):
+            src = os.path.join(self.harness.unsigned, name)
+            if os.path.isfile(src):
+                shutil.copy(src, os.path.join(art, name))
+        with open(os.path.join(art, "pipeline-health.json"), "w") as f:
+            f.write("{}\n")
+        rc, out = self.harness.run_script(
+            "--run-id", "1", "--dry-run", "--accept-breaker", "--bootstrap",
+            env_extra={"STUB_GH_ARTIFACT": art})
+        self.assertEqual(rc, 0, out)
+        self.assertIn("DRY RUN OK", out)
+        self.assertNotIn("unexpected file", out)
+
+    def _stub_health_exit(self, code):
+        path = os.path.join(self.harness.repo, "kt", "health.py")
+        with open(path, "w") as f:
+            f.write("import os, sys\n"
+                    "if __name__ == \"__main__\":\n"
+                    "    sys.exit(int(os.environ[\"KT_HEALTH_EXIT\"]))\n")
+        return {"KT_HEALTH_EXIT": str(code)}
+
+    def test_unexpected_health_exit_refuses_to_sign(self):
+        env = self._stub_health_exit(137)
+        rc, out = self.harness.run_script(
+            "--from-dir", self.harness.unsigned, "--dry-run", "--accept-breaker",
+            env_extra=env)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("pipeline health check failed (exit 137)", out)
+        self.assertNotIn("DRY RUN OK", out)
+
+    def test_health_exit_two_is_not_a_hold(self):
+        env = self._stub_health_exit(2)
+        rc, out = self.harness.run_script(
+            "--from-dir", self.harness.unsigned, "--dry-run", "--accept-breaker",
+            env_extra=env)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("pipeline health check failed (exit 2)", out)
+        self.assertNotIn("health hold", out)
+        self.assertNotIn("DRY RUN OK", out)
+
+    def test_accept_health_allows_hold_exit(self):
+        env = self._stub_health_exit(10)
+        rc, out = self.harness.run_script(
+            "--from-dir", self.harness.unsigned, "--dry-run", "--accept-breaker",
+            env_extra=env)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("pipeline health hold", out)
+        rc, out = self.harness.run_script(
+            "--from-dir", self.harness.unsigned, "--dry-run", "--accept-breaker",
+            "--accept-health", env_extra=env)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("DRY RUN OK", out)
+        self.assertIn("health hold accepted by operator", out)

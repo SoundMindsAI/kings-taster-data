@@ -223,13 +223,32 @@ def load_pub(key):
 
 
 STUB_GH = r'''#!/usr/bin/env python3
-import json, os, sys
+import json, os, shutil, sys
 log = os.environ["STUB_GH_LOG"]
 with open(log, "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\n")
 if sys.argv[1:3] == ["release", "view"]:
     sys.stderr.write(os.environ.get("STUB_GH_VIEW_ERR", "release not found") + "\n")
     sys.exit(1)  # no releases yet (or, with STUB_GH_VIEW_ERR, an outage)
+if sys.argv[1:3] == ["run", "view"]:
+    print(os.environ.get("STUB_GH_RUN_VIEW") or json.dumps({
+        "headBranch": "main", "conclusion": "success",
+        "event": "workflow_dispatch", "workflowName": "pipeline"}))
+    sys.exit(0)
+if sys.argv[1:3] == ["run", "download"]:
+    dest = None
+    args = sys.argv[1:]
+    for i, a in enumerate(args):
+        if a == "--dir" and i + 1 < len(args):
+            dest = args[i + 1]
+    src = os.environ["STUB_GH_ARTIFACT"]
+    if dest:
+        os.makedirs(dest, exist_ok=True)
+        for name in os.listdir(src):
+            path = os.path.join(src, name)
+            if os.path.isfile(path):
+                shutil.copy(path, os.path.join(dest, name))
+    sys.exit(0)
 sys.exit(0)
 '''
 
