@@ -22,10 +22,23 @@ from .validate import RELEASE_FILES, check_not_future, validate_latest
 
 NAMESPACE = "kings-taster"
 PRINCIPALS = ("kings-taster-current", "kings-taster-next")
+SIG_MAX_BYTES = 65536
+_VALID_TIME = r'"\d{8}(?:\d{4,6})?Z?"'
+# OpenSSH accepts these options in any order; each may appear once. Unknown options are refused.
+_OPTION = re.compile(r'namespaces="kings-taster"|valid-after=' + _VALID_TIME + r'|valid-before=' + _VALID_TIME)
 SIGNER_LINE = re.compile(
     r'^(kings-taster-current|kings-taster-next) '
-    r'((?:valid-after="\d{8}(?:\d{4,6})?Z?",)?(?:valid-before="\d{8}(?:\d{4,6})?Z?",)?)?'
-    r'namespaces="kings-taster" ssh-ed25519 [A-Za-z0-9+/]{68}(?:==|=)?(?: [A-Za-z0-9@._-]{0,64})?\Z')
+    r'((?:namespaces="kings-taster"|valid-(?:after|before)=' + _VALID_TIME + r')'
+    r'(?:,(?:namespaces="kings-taster"|valid-(?:after|before)=' + _VALID_TIME + r'))*) '
+    r'ssh-ed25519 [A-Za-z0-9+/]{68}(?:==|=)?(?: [A-Za-z0-9@._-]{0,64})?\Z')
+
+
+def _options_ok(options):
+    names = [o.split("=", 1)[0] for o in options.split(",")]
+    return (names.count("namespaces") == 1 and names.count("valid-after") <= 1
+            and names.count("valid-before") <= 1 and all(_OPTION.fullmatch(o) for o in options.split(",")))
+
+
 FILES = ("latest.json",) + RELEASE_FILES
 
 
@@ -40,7 +53,8 @@ def check_allowed_signers(path):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            if not SIGNER_LINE.match(line):
+            m = SIGNER_LINE.match(line)
+            if not m or not _options_ok(m.group(2)):
                 raise VerifyError("allowed_signers line %d is not an Ed25519 kings-taster key line" % n)
             keys += 1
     if keys == 0:
@@ -62,7 +76,9 @@ def verify_file(path, allowed):
     if not os.path.exists(sig):
         raise VerifyError("%s: signature missing" % os.path.basename(path))
     with open(sig, "rb") as f:
-        sig_bytes = f.read(65536)
+        sig_bytes = f.read(SIG_MAX_BYTES + 1)
+    if len(sig_bytes) > SIG_MAX_BYTES:
+        raise VerifyError("%s: signature file is too large" % os.path.basename(path))
     if sig_bytes.count(b"-----BEGIN SSH SIGNATURE-----") != 1 or sig_bytes.count(b"-----END SSH SIGNATURE-----") != 1:
         raise VerifyError("%s: signature file must hold exactly one signature" % os.path.basename(path))
     exe = _ssh_keygen()

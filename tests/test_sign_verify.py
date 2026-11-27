@@ -146,6 +146,36 @@ class TestVerify(VerifyBase):
             with self.assertRaises(KV.VerifyError):
                 KV.verify_release(out, bad, now=T0)
 
+    def test_validity_options_in_any_order(self):
+        out = self.release("a")
+        pub = load_pub(self.cur)
+        ns, vb, va = 'namespaces="kings-taster"', 'valid-before="20990101"', 'valid-after="20200101"'
+        path = os.path.join(self.tmp, "ordered_signers")
+        for opts in (ns + "," + vb, vb + "," + ns, va + "," + ns + "," + vb, ns + "," + vb + "," + va,
+                     vb + "," + ns + "," + va):
+            with open(path, "w") as f:
+                f.write("kings-taster-current %s %s\n" % (opts, pub))
+            self.assertEqual(KV.verify_release(out, path, now=T0)[0], 0, opts)
+
+    def test_bad_option_lists_rejected(self):
+        pub = load_pub(self.cur)
+        ns, vb = 'namespaces="kings-taster"', 'valid-before="20990101"'
+        path = os.path.join(self.tmp, "bad_options")
+        for opts in (vb, ns + "," + ns, ns + "," + vb + "," + vb, ns + ',cert-authority',
+                     ns + ',valid-before="x"', ns + "," + vb + ",", "," + ns, ns + ',namespaces="other"'):
+            with open(path, "w") as f:
+                f.write("kings-taster-current %s %s\n" % (opts, pub))
+            with self.assertRaises(KV.VerifyError, msg=opts):
+                KV.check_allowed_signers(path)
+
+    def test_oversized_signature_file_rejected(self):
+        out = self.release("a")
+        sig = os.path.join(out, "iocs.json.sig")
+        with open(sig, "ab") as f:
+            f.write(b"\n" * (KV.SIG_MAX_BYTES + 10) + readb(sig))  # a second armored signature past the read cap
+        with self.assertRaisesRegex(KV.VerifyError, "too large"):
+            self.v(out)
+
     def test_committed_allowed_signers_is_public_only(self):
         path = os.path.join(REPO, "config", "allowed_signers")
         KV.check_allowed_signers(path)  # must parse and hold at least one key
@@ -244,6 +274,24 @@ class TestSignAndRelease(SignAndReleaseBase):
         self.assertIn("not in config/allowed_signers", out)
         rc, out = self.run_script("--from-dir", self.unsigned, "--dry-run", key=os.path.join(self.tmp, "nope"))
         self.assertIn("not found", out)
+
+    def test_key_permission_check_works_with_bsd_stat(self):
+        stubs = os.path.join(self.tmp, "stubs")
+        os.makedirs(stubs)
+        real = shutil.which("stat")
+        with open(os.path.join(stubs, "stat"), "w") as f:  # BSD stat: no -c, mode via -f '%Lp'
+            f.write('#!/bin/bash\nif [ "$1" = "-c" ]; then echo "stat: illegal option -- c" >&2; exit 1; fi\n'
+                    'if [ "$1" = "-f" ] && [ "$2" = "%%Lp" ]; then exec %s -c %%a "$3"; fi\nexit 1\n' % real)
+        os.chmod(os.path.join(stubs, "stat"), 0o755)
+        path = stubs + os.pathsep + os.environ["PATH"]
+        rc, out = self.run_script("--from-dir", self.unsigned, "--dry-run", "--accept-breaker",
+                                  env_extra={"PATH": path})
+        self.assertEqual(rc, 0, out)
+        os.chmod(self.key, 0o644)
+        rc, out = self.run_script("--from-dir", self.unsigned, "--dry-run", "--accept-breaker",
+                                  env_extra={"PATH": path})
+        self.assertEqual(rc, 1)
+        self.assertIn("chmod 600", out)
 
     def test_bad_artifact_refused(self):
         d = os.path.join(self.tmp, "evil")

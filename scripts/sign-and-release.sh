@@ -53,7 +53,8 @@ done
 command -v ssh-keygen >/dev/null || die "ssh-keygen not installed"
 
 # Key checks (nothing about the key is printed).
-perm="$(stat -c '%a' "$KEY")"
+# GNU stat uses -c; macOS/BSD stat uses -f.
+perm="$(stat -c '%a' "$KEY" 2>/dev/null || stat -f '%Lp' "$KEY")" || die "can't read the signing key's permissions"
 [[ "$perm" =~ ^[0-7]00$ ]] || die "signing key must not be readable by group/others (chmod 600)"
 ssh-keygen -l -f "$KEY" 2>/dev/null | grep -q '(ED25519)$' || die "signing key is not Ed25519"
 PUB="$(ssh-keygen -y -f "$KEY" 2>/dev/null | cut -d' ' -f1,2)" || die "can't read the public half of the key"
