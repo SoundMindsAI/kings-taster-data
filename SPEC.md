@@ -235,7 +235,7 @@ The fixed texts and test cases for these steps are in the `connectivity` section
 
 ## 5. Optional local checker
 
-King's Taster offers this checker at first run, and it is never on by default. The bot writes one standard-library-only Python file,
+King's Taster offers this checker at first run, and it is never on by default. The offer is made only when the `kings-taster-build` skill is present, during first run or when the user asks to run setup again. The bot writes one standard-library-only Python file,
 `~/.kings-taster/checker.py`, from the build spec and reference snippets in `kings-taster-build`
 (canonicalization, `match_key`, field allowlists). It must pass 100% of `conformance.json` offline, then the
 online canaries, without ever running a package manager's install or build. Before first use the user sees its

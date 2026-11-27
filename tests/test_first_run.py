@@ -57,6 +57,9 @@ class TestSkillTexts(unittest.TestCase):
         self.assertIn("kings-taster-routing", body)
         self.assertIn("skills/kings-taster-build.md", body)
         self.assertIn("is present", body)
+        for needle in ("before any check", "optional checker", "load it only on yes",
+                       "The user may ask for it again", "the same steps"):
+            self.assertIn(needle, body, needle)
         self.assertLess(body.index("connectivity check"), body.index("skills/kings-taster-build.md"))
         # Must not be triggerable as a routine.
         self.assertIn("Never load from a routine", body)

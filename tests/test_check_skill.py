@@ -100,8 +100,9 @@ class TestSkillCaps(unittest.TestCase):
         self.assertIsNotNone(line)
         for needle in ("--max-filesize 5242880", "--max-redirs 0",
                        "%{exitcode}", "$RAW", "$CODE", "mktemp",
-                       "removed after use", "exit code 0"):
+                       "removed after use", "exit code 0", "including on failure"):
             self.assertIn(needle, line, needle)
+        self.assertIn("""'%{http_code}\\n%{url_effective}\\n%{exitcode}' > "$CODE\"""", line)
 
     def test_body_does_not_say_safe_except_the_ban_and_the_product_name(self):
         self.assertFalse(C.body_banned_words(self.body))
@@ -267,8 +268,8 @@ class TestDecisions(unittest.TestCase):
     def _clean_list(self):
         return _src("kings_taster_list", {"class": "clean", "hits": [], "list_hits": 0}, verified=True)
 
-    def _assert_failed_closed(self, data):
-        self.assertEqual(data["class"], "injection_seen")
+    def _assert_failed_closed(self, data, cls="injection_seen"):
+        self.assertEqual(data["class"], cls)
         # decide() records OSV injection_seen without also adding check_failed,
         # so skip validate_record (existing behaviour on this branch).
         rec, _ = C.decide(self._package("left-pad", "1.3.0", "npm"), [
@@ -276,7 +277,9 @@ class TestDecisions(unittest.TestCase):
         ], now=NOW, template_version="1.0.0", finding_id=FID,
            finding_path="~/.kings-taster/findings/%s.json" % FID)
         self.assertEqual(rec["result"], "unknown")
-        self.assertIn("injection_seen", rec["reasons"])
+        self.assertIn(cls, rec["reasons"])
+        if cls != "injection_seen":
+            self.assertNotIn("injection_seen", rec["reasons"])
 
     def test_live_empty_object_is_clean(self):
         r, data = self._live(None, fixture="osv-empty-object.json")
@@ -332,8 +335,8 @@ class TestDecisions(unittest.TestCase):
     def test_live_empty_object_without_confirmed_status_fails_closed(self):
         for status in (None, "", "200", "200\nhttps://api.osv.dev/v1/query",
                        "200\nhttps://evil.example/v1/query\n0",
-                       "200\nhttp://api.osv.dev/v1/query", "200\nhttps://api.osv.dev.evil.example/",
-                       "200\nhttps://api.osv.dev/v1/querybatch", "200\nhttps://api.osv.dev/"):
+                       "200\nhttp://api.osv.dev/v1/query\n0", "200\nhttps://api.osv.dev.evil.example/\n0",
+                       "200\nhttps://api.osv.dev/v1/querybatch\n0", "200\nhttps://api.osv.dev/\n0"):
             r, data = self._live("{}", status=status)
             self.assertEqual(data["class"], "injection_seen", repr(status))
         r, data = _extract("osv", "osv-empty-object.json", os.path.join(FIX, "does-not-exist.txt"))
@@ -342,18 +345,39 @@ class TestDecisions(unittest.TestCase):
     def test_live_exit_code_line_required_and_zero(self):
         url = "200\nhttps://api.osv.dev/v1/query"
         bad = (url, url + "\n", url + "\n\n", url + "\n  \n", url + "\n00", url + "\n0.0",
-               url + "\n1", url + "\n28", url + "\n63", url + "\n7", url + "\n-0",
-               url + "\n0 1", url + "\nx")
+               url + "\n-0", url + "\n+0", url + "\n0 1", url + "\nx")
+        nonzero = (url + "\n1", url + "\n28", url + "\n63", url + "\n7")
         for body in ("{}", '{"vulns": []}'):
             for status in bad:
                 r, data = self._live(body, status=status)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertEqual(data["class"], "injection_seen", (body, status))
+            for status in nonzero:
+                r, data = self._live(body, status=status)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(data["class"], "check_failed", (body, status))
         r, data = self._live("{}", status=url + "\n63")
-        self._assert_failed_closed(data)
+        self._assert_failed_closed(data, "check_failed")
         # A non-zero exit code also blocks a MAL body from being read as a normal reply.
         r, data = self._live(None, status=url + "\n28", fixture="osv-mal.json")
-        self.assertEqual(data["class"], "injection_seen")
+        self._assert_failed_closed(data, "check_failed")
+
+    def test_live_status_splits_on_newline_only(self):
+        # splitlines() would see three lines in each of these; only "\n" counts.
+        for sep in ("\x0b", "\x0c", " ", "\x1c", "\x85", "\r"):
+            status = "200" + sep + "https://api.osv.dev/v1/query" + sep + "0"
+            for body in ("{}", '{"vulns": []}'):
+                r, data = self._live(body, status=status)
+                self.assertEqual(data["class"], "injection_seen", (body, repr(status)))
+            mixed = "200\nhttps://api.osv.dev/v1/query" + sep + "0"
+            r, data = self._live("{}", status=mixed)
+            self.assertEqual(data["class"], "injection_seen", repr(mixed))
+        # Extra lines, even blank ones, are not exactly three lines.
+        for status in ("200\nhttps://api.osv.dev/v1/query\n0\n\n",
+                       "200\nhttps://api.osv.dev/v1/query\n0\nx",
+                       "\n200\nhttps://api.osv.dev/v1/query\n0"):
+            r, data = self._live("{}", status=status)
+            self.assertEqual(data["class"], "injection_seen", repr(status))
 
     def test_live_exit_code_zero_still_works(self):
         for status in ("200\nhttps://api.osv.dev/v1/query\n0",
@@ -381,11 +405,11 @@ class TestDecisions(unittest.TestCase):
 
     def test_live_non_200_fails_closed(self):
         for body in ("{}", '{"vulns": []}'):
-            for status in ("500\nhttps://api.osv.dev/v1/query", "429\nhttps://api.osv.dev/v1/query",
-                           "000\nhttps://api.osv.dev/v1/query"):
+            for status in ("500\nhttps://api.osv.dev/v1/query\n0", "429\nhttps://api.osv.dev/v1/query\n0",
+                           "000\nhttps://api.osv.dev/v1/query\n0"):
                 r, data = self._live(body, status=status)
                 self.assertEqual(data["class"], "injection_seen", (body, status))
-        r, data = self._live("{}", status="500\nhttps://api.osv.dev/v1/query")
+        r, data = self._live("{}", status="500\nhttps://api.osv.dev/v1/query\n0")
         self._assert_failed_closed(data)
 
     def test_live_non_object_body_fails_closed(self):
