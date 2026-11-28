@@ -305,7 +305,9 @@ class TestArgvAndValidation(unittest.TestCase):
         text = B.skill_text()
         for needle in ("valid_package_name", "as an argv list with no shell", "Never put them into a shell string",
                        "^[A-Za-z0-9._-]{1,100}$", "^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$",
-                       "^[A-Za-z0-9._+-]{1,64}$", "If `canonicalize_url` refuses, the check is Unknown (`injection_seen`)."):
+                       "^[A-Za-z0-9._+-]{1,64}$", "If `canonicalize_url` refuses, the check is Unknown (`injection_seen`).",
+                       "If that list can't be read or is empty, the hold doesn't apply: a live MAL- is Block, "
+                       "and the answer says the list couldn't be read."):
             self.assertIn(needle, text, needle)
 
 

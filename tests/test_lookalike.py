@@ -298,6 +298,40 @@ class TestDecideWithBadList(unittest.TestCase):
         self.assertIn(self.LIST_NOTE, rec["explanation"])
         self.assertIn(self.LIST_NOTE, lines)
 
+    def test_firm_list_hit_with_unreadable_list_says_the_list_couldnt_be_read(self):
+        item = dict(_pkg("zzqx-widget"), ecosystem="npm", name="zzqx-widget", version="1.0.0")
+        old_root = C.ROOT
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                C.ROOT = tmp
+                C.clear_popular_cache()
+                src = TestDecideWiring()._src
+                listed = dict(src("kings_taster_list", {
+                    "class": "malicious",
+                    "hits": [{"id": "kt:npm:zzqx-widget", "review_state": "approved"}],
+                    "list_hits": 1,
+                }), verified=True)
+                rec, lines = C.decide(item, [src("osv", {"class": "clean"}), listed],
+                                      now=NOW, template_version="1.0.0", finding_id=FID)
+        finally:
+            C.ROOT = old_root
+            C.clear_popular_cache()
+        self.assertEqual(rec["result"], "block")
+        self.assertIn("malicious_match", rec["reasons"])
+        self.assertIn("check_failed", rec["reasons"])
+        self.assertIn(self.LIST_NOTE, rec["explanation"])
+        self.assertTrue(rec["explanation"].startswith("Block."))
+        self.assertIn(self.LIST_NOTE, lines)
+        self.assertLessEqual(len(lines), 5)
+
+    def test_indicator_only_package_uses_the_same_parts_for_the_hold(self):
+        item = {"item_type": "package", "indicator_defanged": "npm:lodash@1.0.0"}
+        rec, _ = TestDecideWiring()._decide(item, self.MAL)
+        self.assertEqual(rec["result"], "caution")
+        self.assertIn("pending_review", rec["reasons"])
+        self.assertNotIn("malicious_match", rec["reasons"])
+
+
     def test_check_failed_is_added_even_if_lookalike_check_says_clean(self):
         # N5: decide() itself records check_failed; it must not depend on kt.lookalike.check.
         old = C.LK.check
@@ -422,7 +456,7 @@ class TestSpecAndBuildSkill(unittest.TestCase):
         for needle in ("The lookalike-name check.", "except the right-most label",
                        "replace `0` with `o`; replace `1` with `l`; then repeat replacing `rn` with `m` and `vv` with `w`"):
             self.assertIn(needle, flat)
-        for needle in ("Those lists in `config/popular/` are the only names compared.",
+        for needle in ("The lists in `config/popular/` are the only names compared.",
                        "A package is compared only with its own ecosystem's list (npm or PyPI).",
                        "A repo or a link is compared with both lists together.",
                        "If the list that applies can't be read or is empty, the check is Unknown (`check_failed`).",
@@ -432,7 +466,9 @@ class TestSpecAndBuildSkill(unittest.TestCase):
                        "A lookalike can turn \"No known reports\" into a Caution",
                        "A name or label is skipped if",
                        "An ordinary word that is one edit from a popular package name is flagged too, "
-                       "for example the host label of `moments.com`."):
+                       "for example the host label of `moments.com`.",
+                       "A package uses only its own ecosystem's list. If the list that applies can't be read or is empty, "
+                       "the check is Unknown (`check_failed`), and a live malicious report is a Block that says the list couldn't be read."):
             self.assertIn(needle, flat)
         with open(os.path.join(REPO, "SECURITY.md"), encoding="utf-8") as f:
             self.assertIn("| `SPEC.md` | 1.8 |", f.read())
@@ -443,7 +479,11 @@ class TestSpecAndBuildSkill(unittest.TestCase):
         for needle in ("Caution (`lookalike`), never Block", "python3 -E -s -m kt.lookalike",
                        'package|repo|link "$INDICATOR"', "class clean|lookalike|check_failed",
                        "Damerau-Levenshtein distance", "`0`→`o`", "`1`→`l`", "`rn`→`m`", "`vv`→`w`",
-                       "config/popular/", "check_failed", "Reply in 5 lines or fewer"):
+                       "config/popular/", "check_failed", "Reply in 5 lines or fewer",
+                       "An unreadable or empty list is Unknown (`check_failed`)",
+                       "Then the popular-name hold doesn't apply: a live MAL- is Block, "
+                       "and the reply adds \"The popular-name list couldn't be read.\"",
+                       "against a package's own `config/popular/` list (npm or PyPI)"):
             self.assertIn(needle, text, needle)
 
 

@@ -2124,6 +2124,34 @@
     "reasons_exclude": []
    },
    "note": "An ordinary word one edit from a popular name is flagged too (SPEC.md \u00a73.3)."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-firm-list-hit",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:zzqx-widget@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok",
+    "kings_taster_list": "verified_entry_approved"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "malicious_match",
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "is listed as malicious by King's Taster list",
+     "Don't proceed. The popular-name list couldn't be read."
+    ]
+   },
+   "note": "A firm list-hit Block still says the popular-name list couldn't be read when that list is unreadable."
   }
  ],
  "canonicalization_vectors": {

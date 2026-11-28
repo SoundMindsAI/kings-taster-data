@@ -43,7 +43,7 @@ Precedence: Block, then Unknown, then Caution, then No known reports. Every requ
 
 - Package: live OSV (its canary must pass) and a verified list. Repo: GitHub API metadata and a verified list. Link: a verified list, RDAP, and a link-reputation source.
 - A live OSV `MAL-` id or alias is Block. Other OSV hits are Caution, with "upgrade to ≥ X" if a fixed version is known.
-- On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live `MAL-` is held at Caution: "reported malicious by OSV, pending review".
+- On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live `MAL-` is held at Caution: "reported malicious by OSV, pending review". If that list can't be read or is empty, the hold doesn't apply: a live MAL- is Block, and the answer says the list couldn't be read.
 - A verified list hit with `review_state` pending_review is Caution. Every other list hit is Block, including a list canary.
 - A missing or failed required source is Unknown. A non-2xx response is a failed source. A 403 or 429 is `rate_limited` (Unknown, "try again later"). An unset optional source is "not set up". With no link-reputation source set up, a link is Unknown with the distinct wording in `kings-taster-check`; the list file and RDAP still run, and any Block or Caution they find is shown.
 - An unverified list is Unknown (`unverified_list`). Live OSV Blocks and Cautions still show, but the result can't be "No known reports".

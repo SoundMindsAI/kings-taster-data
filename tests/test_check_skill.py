@@ -91,6 +91,9 @@ class TestSkillCaps(unittest.TestCase):
             'package|repo|link "$INDICATOR"',
             "class clean|lookalike|check_failed",
             "An unreadable or empty list is Unknown (`check_failed`)",
+            "Then the popular-name hold doesn't apply: a live MAL- is Block, "
+            'and the reply adds "The popular-name list couldn\'t be read."',
+            "against a package's own `config/popular/` list (npm or PyPI)",
             "plus `label` and `match` when it flags",
         ):
             self.assertIn(needle, text, needle)

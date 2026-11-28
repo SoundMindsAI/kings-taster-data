@@ -350,6 +350,9 @@ def _has_evidence(source, extracted):
     return isinstance(cls, str) and bool(cls)
 
 
+POPULAR_LIST_UNREADABLE_NOTE = "The popular-name list couldn't be read."
+
+
 def decide(item, sources, *, now, template_version, health=None, finding_id=None,
            finding_path="~/.kings-taster/findings/example.json"):
     """Apply the fixed checklist rules and return record, explanation, and at most 5 verdict lines.
@@ -363,12 +366,16 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
     popular = False
     reasons = []
     try:
-        eco = LK.package_ecosystem(item) if item_type == "package" else None
-        if eco:
-            popular_for(eco)  # a package needs only its own ecosystem's list
+        if item_type == "package":
+            eco, name = LK.package_parts(item)
+            if eco:
+                popular_for(eco)  # a package needs only its own ecosystem's list
+            else:
+                _popular_names()
+            popular = is_popular(eco or "", name or "")
         else:
             _popular_names()  # repo, link, other: both lists must be usable
-        popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
+            popular = is_popular(item.get("ecosystem") or "", item.get("name") or "")
     except (OSError, ValueError):
         popular_failed = True
         reasons.append("check_failed")
@@ -390,7 +397,7 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
 
     checked = []
     matched = []
-    osv_note = None
+    list_note = POPULAR_LIST_UNREADABLE_NOTE if popular_failed else None
     fixed = None
     deciding = None  # (rank, source, date, snippet)
     no_link = False
@@ -448,10 +455,9 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
                     # is already in reasons; keep the hit in matched and say the list couldn't be read.
                     reasons.append("malicious_match")
                     matched.append(_match(hit["id"], url, "osv"))
-                    osv_note = "The popular-name list couldn't be read."
                     deciding = _best(deciding, RESULT_RANK["block"], "osv", date,
-                        "Block. %s is listed as malicious by OpenSSF Malicious Packages via OSV.dev (%s, %s). Don't proceed. %s"
-                        % (indicator, url, date, osv_note))
+                        "Block. %s is listed as malicious by OpenSSF Malicious Packages via OSV.dev (%s, %s). Don't proceed."
+                        % (indicator, url, date))
                 elif popular:
                     reasons.append("pending_review")
                     matched.append(_match(hit["id"], url, "osv"))
@@ -577,6 +583,8 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
         explanation = deciding[3] if deciding and deciding[0] == RESULT_RANK["block"] else (
             "Block. %s is listed as malicious by a required source (https://osv.dev/vulnerability/MAL, %s). Don't proceed."
             % (indicator, _date10(now)))
+        if list_note and list_note not in explanation:
+            explanation = "%s %s" % (explanation, list_note)
     elif result == "unknown" and no_link and reasons == ["no_link_source"]:
         explanation = ("Unknown. I can't check links until a link-reputation source is set up. "
                        "Don't proceed. Say 'set up link checks' to add one.")
@@ -585,8 +593,6 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
         explanation = ("Unknown. I couldn't finish the check: %s. Don't proceed until it can be checked." % which)
         if deciding and deciding[3].startswith("Caution."):
             explanation = "%s %s" % (explanation, deciding[3])
-        if osv_note:
-            explanation = "%s %s" % (explanation, osv_note)
     elif result == "caution":
         explanation = deciding[3] if deciding else (
             "Caution. A required source reported a concern, from OSV.dev (https://osv.dev/vulnerability/OSV, %s)." % _date10(now))
@@ -599,7 +605,7 @@ def decide(item, sources, *, now, template_version, health=None, finding_id=None
 
     rec = _record(item, checked, result, reasons, explanation, now, template_version, finding_id,
                   matched=matched, fixed=fixed)
-    lines = _verdict_lines(rec, deciding, finding_path, osv_note)
+    lines = _verdict_lines(rec, deciding, finding_path, list_note if result == "block" else None)
     return rec, lines
 
 

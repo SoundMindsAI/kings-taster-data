@@ -79,7 +79,7 @@ def popular_union(root=None):
     return frozenset(name for _, name in check._popular_names(root))
 
 
-def _package_parts(item):
+def package_parts(item):
     """(canonical ecosystem or None, name) from the item fields or the npm:/pypi: indicator."""
     eco, name = item.get("ecosystem"), item.get("name")
     if not (eco and name):
@@ -92,12 +92,12 @@ def _package_parts(item):
 
 def package_ecosystem(item):
     """"npm", "PyPI", or None for a package item."""
-    return _package_parts(item)[0]
+    return package_parts(item)[0]
 
 
 def _package_labels(item):
     from .common import normalize_package
-    eco, name = _package_parts(item)
+    eco, name = package_parts(item)
     if eco is None:
         return []
     canon = normalize_package(eco, name)
