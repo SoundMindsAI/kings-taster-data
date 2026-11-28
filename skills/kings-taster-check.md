@@ -1,8 +1,6 @@
 # kings-taster-check
 
-Load to check a repo, package, or link.
-
-Never say "safe". Never print or summarize a key. Never read a raw response or README. Never contact, clone, install, or run the item. Write only under `~/.kings-taster/` and temp.
+Never say "safe", print or summarize a key, read a raw response or README, or contact, clone, install, or run the item. Write only under `~/.kings-taster/` and temp.
 
 If `~/.kings-taster/health.json` is failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
 
@@ -18,13 +16,13 @@ Wording:
 - Unknown. I can't check links until a link-reputation source is set up. Don't proceed. Say 'set up link checks' to add one.
 - No known reports. Checked against <source (date)>, … on <date>.
 
-A live OSV `MAL-` or alias is Block; other hits are Caution, with "upgrade to ≥ X" if known. On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live MAL- is held at Caution: "reported malicious by OSV, pending review". A verified list hit with review_state pending_review is Caution, never Block: "reported malicious by the King's Taster list, pending review". Other list hits Block, including a list canary. A Safe Browsing line adds Google's attribution and notice.
+A live OSV `MAL-` or alias is Block; other hits are Caution ("upgrade to ≥ X" if known). On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live MAL- is Caution: "reported malicious by OSV, pending review". A verified list hit with review_state pending_review is Caution, never Block: "reported malicious by the King's Taster list, pending review". Other list hits Block, including a list canary. A Safe Browsing line adds Google's attribution and notice. A lookalike name is Caution (`lookalike`), never Block, using the Commands lookalike rule (no network).
 
 Read keys only from `~/.kings-taster/keys.env` (`chmod 600`).
 
 Run the Commands exactly. Save raw responses to unread temp files. Extractors print at most 10 allowlisted lines. Write the finding to `~/.kings-taster/findings/`. Reply in 5 lines or fewer: result and item; deciding source and date; other sources and status; reason code if Unknown or Caution; path of the finding. Open it when asked why.
 
-Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block or Unknown. Never cache a link. Cache the RDAP bootstrap for 7 days.
+Reuse package or repo Caution or No known reports for 24 hours only if name, version, manifest hash, and shard SHA-256 match, with the original date. Never reuse Block or Unknown. Never cache a link. Cache RDAP bootstrap for 7 days.
 
 <!-- commands -->
 ## Commands
@@ -38,7 +36,7 @@ Time, only from `date -u`: `date -u +%Y-%m-%dT%H:%M:%SZ`. Fetch (except the list
 - IANA: `GET https://data.iana.org/rdap/dns.json`, then `GET` the matching RDAP server (HTTPS, max-redirs 0).
 - Safe Browsing v5: `POST https://safebrowsing.googleapis.com/v5/urls:search` with at most 50 URLs, including Google's test URL. Before using a Safe Browsing key, require it to match `^[A-Za-z0-9_-]{1,128}$`. If it doesn't, that source has failed. Check with a whole-string match such as `[[ $SAFE_BROWSING_KEY =~ ^[A-Za-z0-9_-]{1,128}$ ]]` or `re.fullmatch`, never grep. Pass a matching key with `printf 'x-goog-api-key: %s\n' "$SAFE_BROWSING_KEY" | curl -H @- --data @FILE ...` (`-H @-` uses stdin, so the POST body must be `--data @FILE`) so it never appears in argv or the URL. Never print the key.
 - List file (only allowed redirect): with two fresh `mktemp` files per request (`$RAW` and `$CODE`), removed after use, including on failure, `curl --proto =https --max-redirs 1 -sS -L -o "$RAW" -w '%{url_effective}\n' > "$CODE"` for `https://github.com/SoundMindsAI/kings-taster-data/releases/download/kt-latest/latest.json` and `latest.json.sig`. The effective host must be `github.com` or `release-assets.githubusercontent.com`. Fetch `manifest.json` (and `.sig`) and the shard for the item's `match_key` the same way. Verify the directory with `scripts/verify.sh DIR --allowed-signers allowed_signers --state ~/.kings-taster/verify-state.json --update-state` (or `python3 -E -s -m kt.verify`). That runs `ssh-keygen -Y verify -f allowed_signers -I kings-taster-current -n kings-taster -s FILE.sig < FILE` (or `-I kings-taster-next`), checks each file's SHA-256 and `file_type` against `latest.json` and each shard against `manifest.json`, enforces the 64 KiB signature cap, honors `keys.json` and `root_pins` (a missing `keys.json` is refused once the pins are published), writes a watermark with `--update-state` after a successful verify, and uses `--state` to refuse rollback. A failed verify is `unverified_list`.
-
+- Lookalike (no network): from the repo root, run `cd <repo> && python3 -E -s -m kt.lookalike package|repo|link "$INDICATOR"`. It prints `class clean|lookalike|check_failed`, plus `label` and `match` when it flags. A match is Caution (`lookalike`), never Block. Compare the canonical package name (and a scoped npm name's unscoped part), each lowercase repo owner and repo name, and each host label except the TLD (skip IPs and non-ASCII) against a package's own `config/popular/` list (npm or PyPI), or against both lists for a repo or a link. Do not flag an exact popular name. Flag when both have 5+ characters and Damerau-Levenshtein distance ≤ 1, or they match after this fold, in order: `0`→`o`, `1`→`l`, then `rn`→`m` and `vv`→`w` until neither remains (popular name 5+ characters). Cite the alphabetically first match. An unreadable or empty list is Unknown (`check_failed`). Then the popular-name hold doesn't apply: a live MAL- is Block, and the reply adds "The popular-name list couldn't be read."
 ### extract-osv
 python3 -I -c '
 import json,re,sys

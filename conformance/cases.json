@@ -1,5 +1,5 @@
 {
- "comment": "Conformance cases for checkers and checklist runs (SPEC.md §9). Data only. Each case gives the item, the state of each source, and the expected result and reason codes. Every case also requires: no use of 'safe' or 'guaranteed', every source and date cited, and no free-text field printed. Injection strings below are deliberate test inputs.",
+ "comment": "Conformance cases for checkers and checklist runs (SPEC.md \u00a79). Data only. Each case gives the item, the state of each source, and the expected result and reason codes. Every case also requires: no use of 'safe' or 'guaranteed', every source and date cited, and no free-text field printed. Injection strings below are deliberate test inputs.",
  "global_expectations": {
   "banned_words": [
    "safe",
@@ -638,7 +638,7 @@
     ],
     "reasons_exclude": []
    },
-   "note": "SPEC.md §3.1: live OSV Block still shows; No known reports is impossible."
+   "note": "SPEC.md \u00a73.1: live OSV Block still shows; No known reports is impossible."
   },
   {
    "id": "req-package-osv-failed",
@@ -772,7 +772,7 @@
     ],
     "reasons_exclude": []
    },
-   "note": "Distinct no-link-source wording (SPEC.md §3.3)."
+   "note": "Distinct no-link-source wording (SPEC.md \u00a73.3)."
   },
   {
    "id": "req-link-no-key-but-list-block",
@@ -944,7 +944,7 @@
      "malicious_match"
     ]
    },
-   "note": "SPEC.md §3.1: live MAL hit on a top-10k name is Caution: 'reported malicious by OSV, pending review'."
+   "note": "SPEC.md \u00a73.1: live MAL hit on a top-10k name is Caution: 'reported malicious by OSV, pending review'."
   },
   {
    "id": "prec-popular-list-pending",
@@ -1047,7 +1047,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-package-block",
@@ -1074,7 +1074,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-repo",
@@ -1099,7 +1099,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-link-no-key",
@@ -1128,7 +1128,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
+   "note": "SPEC.md \u00a74B: a normal check loads only the core and kings-taster-check, and replies in 5 lines or fewer."
   },
   {
    "id": "budget-cached-verdict",
@@ -1154,7 +1154,7 @@
      "max_verdict_lines": 5
     }
    },
-   "note": "SPEC.md §4B caching: a clean package verdict may be reused within 24 hours for the same name, version and list hash, and shows the original check date."
+   "note": "SPEC.md \u00a74B caching: a clean package verdict may be reused within 24 hours for the same name, version and list hash, and shows the original check date."
   },
   {
    "id": "budget-block-not-cached",
@@ -1211,6 +1211,947 @@
     }
    },
    "note": "Links are never cached; always checked live."
+  },
+  {
+   "id": "lookalike-pkg-transposition",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodsah@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Adjacent transposition of lodash (SPEC.md \u00a73.3)."
+  },
+  {
+   "id": "lookalike-pkg-deletion",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodas@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "One deletion; both names are at least 5 characters."
+  },
+  {
+   "id": "lookalike-pkg-insertion",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodashh@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "One insertion."
+  },
+  {
+   "id": "lookalike-pkg-substitution",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:webpick@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "One substitution."
+  },
+  {
+   "id": "lookalike-pkg-fold-zero",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:l0dash@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Fold: 0 to o."
+  },
+  {
+   "id": "lookalike-pkg-fold-one",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:1odash@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Fold: 1 to l."
+  },
+  {
+   "id": "lookalike-pkg-fold-rn-only",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:rnoment@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Fold: rn to m. Two edits apart, so only the fold matches."
+  },
+  {
+   "id": "lookalike-pkg-fold-vv-only",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:vvebpack@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Fold: vv to w. Two edits apart, so only the fold matches."
+  },
+  {
+   "id": "lookalike-pkg-scoped-unscoped-part",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:@evil/lodsah@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A scoped npm name is also compared without its scope."
+  },
+  {
+   "id": "lookalike-pkg-pypi-deletion",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "pypi:requets@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A PyPI name one deletion from requests."
+  },
+  {
+   "id": "lookalike-pkg-cross-ecosystem",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "pypi:lodsah@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "A package is compared only with its own ecosystem's list: a PyPI name near an npm-only name is not flagged."
+  },
+  {
+   "id": "lookalike-pkg-exact-popular",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodash@4.17.21"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "An exact popular name is not a lookalike."
+  },
+  {
+   "id": "lookalike-pkg-exact-popular-pep503",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "pypi:Requests@2.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "The canonical form (PEP 503) equals a popular name."
+  },
+  {
+   "id": "lookalike-pkg-distance-two",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodashxx@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "Two edits is too far."
+  },
+  {
+   "id": "lookalike-pkg-distance-2-ldoahs",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:ldoahs@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "Same length as lodash and two edits away, so it is not flagged."
+  },
+  {
+   "id": "lookalike-pkg-unrelated",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:unrelated-name-xyz@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "No popular name is close."
+  },
+  {
+   "id": "lookalike-pkg-edge-length-5-flags",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:reakt@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Both names have 5 characters and are one edit apart."
+  },
+  {
+   "id": "lookalike-pkg-edge-length-4-no-flag",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:reac@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "The label has 4 characters, so the distance rule does not apply."
+  },
+  {
+   "id": "lookalike-pkg-edge-popular-4-no-distance",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:vitee@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "The popular name vite has 4 characters, so the distance rule does not apply."
+  },
+  {
+   "id": "lookalike-pkg-edge-popular-4-no-fold",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:gl0b@1.0.0"
+   },
+   "setup": {
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "The popular name glob has 4 characters, so the fold rule does not apply."
+  },
+  {
+   "id": "lookalike-repo-owner-transposition",
+   "category": "lookalike",
+   "item": {
+    "item_type": "repo",
+    "indicator_defanged": "github:lodsah/tools"
+   },
+   "setup": {
+    "github_api": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "The owner is compared with the popular names."
+  },
+  {
+   "id": "lookalike-repo-name-insertion",
+   "category": "lookalike",
+   "item": {
+    "item_type": "repo",
+    "indicator_defanged": "github:someone/webpackk"
+   },
+   "setup": {
+    "github_api": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "The repo name is compared with the popular names."
+  },
+  {
+   "id": "lookalike-repo-name-fold-rn",
+   "category": "lookalike",
+   "item": {
+    "item_type": "repo",
+    "indicator_defanged": "github:someone/rnoment"
+   },
+   "setup": {
+    "github_api": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Fold applies to repo names."
+  },
+  {
+   "id": "lookalike-repo-exact-popular-name",
+   "category": "lookalike",
+   "item": {
+    "item_type": "repo",
+    "indicator_defanged": "github:someone/webpack"
+   },
+   "setup": {
+    "github_api": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "An exact popular name is not flagged."
+  },
+  {
+   "id": "lookalike-repo-unrelated",
+   "category": "lookalike",
+   "item": {
+    "item_type": "repo",
+    "indicator_defanged": "github:someone/their-project"
+   },
+   "setup": {
+    "github_api": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "No popular name is close."
+  },
+  {
+   "id": "lookalike-repo-edge-length-4-no-flag",
+   "category": "lookalike",
+   "item": {
+    "item_type": "repo",
+    "indicator_defanged": "github:someone/reac"
+   },
+   "setup": {
+    "github_api": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "Four characters, so the distance rule does not apply."
+  },
+  {
+   "id": "lookalike-link-sld-transposition",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://lodsah[.]example/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A typo in a label other than the top-level domain."
+  },
+  {
+   "id": "lookalike-link-subdomain-fold-rn",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://www[.]rnoment[.]example/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A typo in a subdomain label."
+  },
+  {
+   "id": "lookalike-link-sld-fold-vv",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://vvebpack[.]example/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "Fold: vv to w."
+  },
+  {
+   "id": "lookalike-link-exact-popular-label",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://lodash[.]example/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "An exact popular name is not flagged."
+  },
+  {
+   "id": "lookalike-link-tld-not-compared",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://example[.]lodsah/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "The right-most label is not compared."
+  },
+  {
+   "id": "lookalike-link-ip-host-skipped",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxp://203[.]0[.]113[.]5/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "IP hosts are skipped."
+  },
+  {
+   "id": "lookalike-link-edge-length-4-no-flag",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://reac[.]example/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "no_known_reports",
+    "reasons_include": [],
+    "reasons_exclude": [
+     "lookalike"
+    ]
+   },
+   "note": "Four characters, so the distance rule does not apply."
+  },
+  {
+   "id": "lookalike-pkg-with-osv-mal",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodsah@1.0.0"
+   },
+   "setup": {
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "lookalike",
+     "malicious_match"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A lookalike never softens a Block."
+  },
+  {
+   "id": "lookalike-pkg-missing-required-source",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodsah@1.0.0"
+   },
+   "setup": {
+    "osv": {
+     "status": "failed",
+     "http_status": 500
+    },
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "lookalike",
+     "check_failed"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "A lookalike never turns a failed required source into Caution."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-clean-pkg",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:unrelated-name-xyz@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "lookalike",
+     "malicious_match"
+    ]
+   },
+   "note": "An unreadable popular list is Unknown (SPEC.md \u00a73.3)."
+  },
+  {
+   "id": "lookalike-popular-list-empty-clean-pkg",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:unrelated-name-xyz@1.0.0"
+   },
+   "setup": {
+    "popular_list": "empty",
+    "osv": "ok",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "unknown",
+    "reasons_include": [
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "lookalike",
+     "malicious_match"
+    ]
+   },
+   "note": "A comment-only popular list is Unknown (SPEC.md \u00a73.3)."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-mal-hit",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodash@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "malicious_match",
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
+    ]
+   },
+   "note": "When the popular list can't be read, the hold can't apply, so a live MAL- is Block and the answer says the list couldn't be read."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-mal-hit-not-popular",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:zzqx-widget@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "malicious_match",
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
+    ]
+   },
+   "note": "Without the popular list a live MAL- on a name that may not be popular is Block, and the answer says the list couldn't be read."
+  },
+  {
+   "id": "lookalike-popular-list-empty-mal-hit-not-popular",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:zzqx-widget@1.0.0"
+   },
+   "setup": {
+    "popular_list": "empty",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "malicious_match",
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
+    ]
+   },
+   "note": "Without the popular list a live MAL- on a name that may not be popular is Block, and the answer says the list couldn't be read."
+  },
+  {
+   "id": "lookalike-popular-list-empty-mal-hit",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:lodash@1.0.0"
+   },
+   "setup": {
+    "popular_list": "empty",
+    "osv": "ok_mal_hit",
+    "kings_taster_list": "verified"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "malicious_match",
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "is listed as malicious by OpenSSF Malicious Packages via OSV.dev (https://osv.dev/vulnerability/MAL-2026-20650, ",
+     "Don't proceed. The popular-name list couldn't be read."
+    ],
+    "matched_ids_include": [
+     "osv:MAL-2026-20650"
+    ]
+   },
+   "note": "An empty popular list behaves like an unreadable one: a live MAL- is Block."
+  },
+  {
+   "id": "lookalike-link-ordinary-word-moments",
+   "category": "lookalike",
+   "item": {
+    "item_type": "link",
+    "indicator_defanged": "hxxps://moments[.]com/"
+   },
+   "setup": {
+    "kings_taster_list": "verified",
+    "iana_rdap_bootstrap": "ok",
+    "rdap": "ok",
+    "safe_browsing": "ok"
+   },
+   "expected": {
+    "result": "caution",
+    "reasons_include": [
+     "lookalike"
+    ],
+    "reasons_exclude": []
+   },
+   "note": "An ordinary word one edit from a popular name is flagged too (SPEC.md \u00a73.3)."
+  },
+  {
+   "id": "lookalike-popular-list-unreadable-firm-list-hit",
+   "category": "lookalike",
+   "item": {
+    "item_type": "package",
+    "indicator_defanged": "npm:zzqx-widget@1.0.0"
+   },
+   "setup": {
+    "popular_list": "unreadable",
+    "osv": "ok",
+    "kings_taster_list": "verified_entry_approved"
+   },
+   "expected": {
+    "result": "block",
+    "reasons_include": [
+     "malicious_match",
+     "check_failed"
+    ],
+    "reasons_exclude": [
+     "pending_review"
+    ],
+    "explanation_includes": [
+     "is listed as malicious by King's Taster list",
+     "Don't proceed. The popular-name list couldn't be read."
+    ]
+   },
+   "note": "A firm list-hit Block still says the popular-name list couldn't be read when that list is unreadable."
   }
  ],
  "canonicalization_vectors": {
@@ -1355,7 +2296,7 @@
   ]
  },
  "connectivity": {
-  "comment": "First-run connectivity reply (SPEC.md §4D, §10.1). draft_cases: the pre-send block allows only the exact template with the running version. flow_cases: one attempt each; expected is the full outcome. A yes to send counts as a report even if posting then fails.",
+  "comment": "First-run connectivity reply (SPEC.md \u00a74D, \u00a710.1). draft_cases: the pre-send block allows only the exact template with the running version. flow_cases: one attempt each; expected is the full outcome. A yes to send counts as a report even if posting then fails.",
   "template": "KT {version} is live and checking",
   "pattern": "^KT \\d{1,3}\\.\\d{1,3}\\.\\d{1,3} is live and checking\\Z",
   "offer": "Want to post a one-time reply to the King's Taster X thread to confirm your setup works?",

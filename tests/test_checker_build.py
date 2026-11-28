@@ -305,7 +305,9 @@ class TestArgvAndValidation(unittest.TestCase):
         text = B.skill_text()
         for needle in ("valid_package_name", "as an argv list with no shell", "Never put them into a shell string",
                        "^[A-Za-z0-9._-]{1,100}$", "^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]{1,214}$",
-                       "^[A-Za-z0-9._+-]{1,64}$", "If `canonicalize_url` refuses, the check is Unknown (`injection_seen`)."):
+                       "^[A-Za-z0-9._+-]{1,64}$", "If `canonicalize_url` refuses, the check is Unknown (`injection_seen`).",
+                       "If that list can't be read or is empty, the hold doesn't apply: a live `MAL-` is Block, "
+                       "and the answer says the list couldn't be read."):
             self.assertIn(needle, text, needle)
 
 
@@ -320,8 +322,10 @@ class TestKeys(unittest.TestCase):
     def test_skill_requires_domain_and_ip(self):
         text = B.skill_text()
         for needle in ("`url-sha256:`, the `domain:` key", "`ip:` key", "SPEC.md §3.3 also requires a lookalike-name check",
-                       "Leave it out until `kings-taster-check` states that rule."):
+                       "Apply the same rule `kings-taster-check` states, offline, with `python3 -E -s -m kt.lookalike`",
+                       "Don't write a second algorithm"):
             self.assertIn(needle, text, needle)
+        self.assertNotIn("Leave it out", text)
 
 
 class TestRegexParityAndKeys(unittest.TestCase):

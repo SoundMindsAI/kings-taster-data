@@ -1,6 +1,6 @@
 # King's Taster ("the King's Poison Taster"): public specification
 
-**Spec version 1.7, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
+**Spec version 1.8, matches kings-taster-data release format `schema_version: 1` (first signed release: not yet published).**
 This document is versioned. It is updated in the same pull request as any change to the release files, the
 schemas or the pipeline, and the version line above says which release it describes.
 
@@ -79,6 +79,7 @@ vulnerable (Caution, "upgrade to X or later"). A live malicious hit on a popular
 - **PyPI:** read `uv.lock`, `poetry.lock` or a hashed `requirements.txt`, otherwise a binary-only dry run.
   A package without a wheel gives Caution ("source build required") and is never built.
 - **Repos:** GitHub API metadata only (owner, age, archived flag, lookalike name). The repo's files are never read.
+- **Lookalike names:** packages and repos use the same lookalike-name check as links, with the rule in §3.3. For a package, the name is compared as a whole, and a scoped npm name is also compared without its scope. For a repo, the owner and the repo name are each compared.
 - **Private registries:** the user may skip OSV for these ("not set up"); a name that also exists publicly gives Caution.
 - **Names** that break npm's naming rules or PEP 508 give Unknown (`injection_seen`).
 
@@ -88,6 +89,21 @@ The bot never contacts the link. It checks the list file (`match_key` against th
 IP), RDAP (servers from the IANA bootstrap file only), a lookalike-name check, and the user's own
 link-reputation source. With no link-reputation source set up, the answer is Unknown with the distinct wording
 above; the list file and RDAP still run, and any Block or Caution they find is shown.
+
+**The lookalike-name check.** It needs no network and gives the same answer every time. Names are lowercased as ASCII, then put in their usual canonical form (npm lowercase, PyPI per PEP 503). The lists in `config/popular/` are the only names compared. A package is compared only with its own ecosystem's list (npm or PyPI). A repo or a link is compared with both lists together. If the list that applies can't be read or is empty, the check is Unknown (`check_failed`). When that happens, the popular-name hold can't apply, so a live malicious report is a Block, and the answer says the list couldn't be read.
+
+- For a package, the canonical name is compared as a whole. A scoped npm name (`@scope/pkg`) is also compared without its scope (`pkg`).
+- For a repo, the lowercase owner and the lowercase repo name are compared separately.
+- For a link, each dot-separated label of the canonical host is compared except the right-most label (the top-level domain). A link with an IP host is skipped. A link the canonicalizer refuses is skipped, because the refusal already gives Unknown. This avoids needing the Public Suffix List, and it still catches a typo in the main name or in a subdomain label.
+
+A name or label is skipped if it is exactly a popular name, or if it has a character that is not ASCII. Otherwise it is a lookalike of a popular name when either rule holds:
+
+1. Distance: the label and the popular name are both at least 5 characters long, and they are one edit apart. An edit is one insertion, one deletion, one substitution, or one swap of two neighbouring characters.
+2. Confusable fold: the popular name is at least 5 characters long, and the label and the popular name differ as written but are equal after the fold. The fold is, in this order: replace `0` with `o`; replace `1` with `l`; then repeat replacing `rn` with `m` and `vv` with `w` until neither is left. There are no other substitutions.
+
+An ordinary word that is one edit from a popular package name is flagged too, for example the host label of `moments.com`.
+
+If several popular names match, the first in alphabetical order is named. A lookalike is a Caution with reason `lookalike`, never a Block: "Caution. <label> looks like the popular name <popular>, from the lookalike-name check (<date>)." A lookalike can turn "No known reports" into a Caution, but the lookalike flag never changes a Block or an Unknown. The date comes from the same clock as the rest of the check.
 
 ## 4. Checklist mode (default): fixed commands
 
@@ -542,3 +558,4 @@ entry is revoked in the next signed file, or right away through `paused` or `rev
 | 1.5 | 2026-11-27 | Adds §7.3A: the format and verifier for a signed `keys.json` that will name the current and next daily signing keys, with a 90-day validity window, `revoked_keys`, and signature namespace `kings-taster-keys`. The first signed `keys.json` and the master public-key pins are not published yet. Until they are, daily files still verify against `config/allowed_signers`, and a `keys.json` that is present is refused. A `keys.json` must be 64 KiB or smaller (65,536 bytes), and its `generated_at` may not be more than 5 minutes ahead. |
 | 1.6 | 2026-11-27 | Once the master public-key pins are published, a release with no `keys.json` is refused (the bot will treat the list as unverifiable and answer Unknown). Until the pins are published, a release can still be verified without a `keys.json`, and a `keys.json` that is present is refused. |
 | 1.7 | 2026-11-27 | Builds the daily pipeline health check (§7.5): after each daily build, and again at sign-and-release, it checks shard hashes, canaries, silent sources (starting gaps: 3 days for OSV `MAL-` records, 14 days for CISA KEV), date freshness, and a 50% size-jump hold. The hourly watchdog still alerts after 26 hours and also checks canaries and dates on the pointer files. |
+| 1.8 | 2026-11-27 | Defines the lookalike-name check (§3.3) for packages, repos and links with no network: each name, repo owner and repo name, or link host label except the top-level domain is compared with the popular-name lists, and is a Caution (`lookalike`) if it is one edit apart (both at least 5 characters) or equal after a fixed fold of `0`, `1`, `rn` and `vv`. Exact popular names, IP hosts and non-ASCII labels are skipped. A package uses only its own ecosystem's list. If the list that applies can't be read or is empty, the check is Unknown (`check_failed`), and a live malicious report is a Block that says the list couldn't be read. |

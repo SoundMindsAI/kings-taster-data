@@ -46,7 +46,7 @@ CLEAN_LIST = {"class": "clean", "hits": [], "list_hits": 0}
 def _item(spec):
     ind = spec["indicator_defanged"]
     item = dict(spec)
-    m = re.match(r"^(npm|pypi):([^@]+)@(.+)$", ind)
+    m = re.match(r"^(npm|pypi):(@?[^@]+)@(.+)$", ind)
     if m:
         item.update(ecosystem="npm" if m.group(1) == "npm" else "PyPI", name=m.group(2), version=m.group(3))
     return item
@@ -197,9 +197,34 @@ def _build_source(name, token, item):
 
 
 def _run_case(case):
+    mode = case["setup"].get("popular_list")
+    if mode is None:
+        return _decide_case(case)
+    if mode not in ("unreadable", "empty"):
+        raise unittest.SkipTest("popular_list %r not expressible" % mode)
+    old_root = C.ROOT
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            if mode == "empty":
+                d = os.path.join(tmp, "config", "popular")
+                os.makedirs(d)
+                for fname in ("npm.txt", "pypi.txt"):
+                    with open(os.path.join(d, fname), "w", encoding="utf-8") as fh:
+                        fh.write("# comments only\n\n")
+            C.ROOT = tmp
+            C.clear_popular_cache()
+            return _decide_case(case)
+    finally:
+        C.ROOT = old_root
+        C.clear_popular_cache()
+
+
+def _decide_case(case):
     item = _item(case["item"])
     sources = []
     for name, token in case["setup"].items():
+        if name == "popular_list":
+            continue
         if name in ("npm_registry", "pypi_registry", "cache", "checker"):
             raise unittest.SkipTest("setup %s not expressible" % name)
         src = _build_source(name, token, item)
@@ -231,6 +256,11 @@ class TestConformanceCases(unittest.TestCase):
                     self.assertIn(reason, rec["reasons"])
                 for reason in exp["reasons_exclude"]:
                     self.assertNotIn(reason, rec["reasons"])
+                for text in exp.get("explanation_includes", []):
+                    self.assertIn(text, rec["explanation"])
+                matched_ids = [m["id"] for m in rec["matched_entries"]]
+                for mid in exp.get("matched_ids_include", []):
+                    self.assertIn(mid, matched_ids)
                 if "budget" in exp:
                     self.assertLessEqual(len(lines), exp["budget"]["max_verdict_lines"])
                 ran += 1

@@ -43,7 +43,7 @@ Precedence: Block, then Unknown, then Caution, then No known reports. Every requ
 
 - Package: live OSV (its canary must pass) and a verified list. Repo: GitHub API metadata and a verified list. Link: a verified list, RDAP, and a link-reputation source.
 - A live OSV `MAL-` id or alias is Block. Other OSV hits are Caution, with "upgrade to ≥ X" if a fixed version is known.
-- On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live `MAL-` is held at Caution: "reported malicious by OSV, pending review".
+- On a top-10k name in `config/popular/` (npm lowercase, PyPI PEP 503), a live `MAL-` is held at Caution: "reported malicious by OSV, pending review". If that list can't be read or is empty, the hold doesn't apply: a live `MAL-` is Block, and the answer says the list couldn't be read.
 - A verified list hit with `review_state` pending_review is Caution. Every other list hit is Block, including a list canary.
 - A missing or failed required source is Unknown. A non-2xx response is a failed source. A 403 or 429 is `rate_limited` (Unknown, "try again later"). An unset optional source is "not set up". With no link-reputation source set up, a link is Unknown with the distinct wording in `kings-taster-check`; the list file and RDAP still run, and any Block or Caution they find is shown.
 - An unverified list is Unknown (`unverified_list`). Live OSV Blocks and Cautions still show, but the result can't be "No known reports".
@@ -51,7 +51,7 @@ Precedence: Block, then Unknown, then Caution, then No known reports. Every requ
 - Live OSV is `POST https://api.osv.dev/v1/query` only. Never use querybatch. Require HTTP 200 and the exact effective URL `https://api.osv.dev/v1/query`, read from the status file written by `curl -w '%{http_code}\n%{url_effective}'`. Accept `{}` as zero vulns (clean) only when that status and URL are confirmed. A missing, unreadable or unconfirmed status file, a non-200, or a wrong URL (including `/v1/querybatch`) is `injection_seen`.
 - Follow OSV's `next_page_token` to the last page, on that same endpoint. A token must match `^[A-Za-z0-9_-]{1,256}$` and you follow at most 20 pages. A bad token, going past 20 pages, or a page with a token you don't follow means that source has failed. Never treat a partial page set as clean.
 - Record `http_status` and `response_sha256` on every `checked_against` entry (SPEC.md §4).
-- Link: from the canonical `http://` or `https://` URL, match `url-sha256:`, the `domain:` key (IDNA, as `match_key` does) and, when the host is an IP address, the `ip:` key, all against the verified list. SPEC.md §3.3 also requires a lookalike-name check (Caution `lookalike`). Leave it out until `kings-taster-check` states that rule.
+- Link: from the canonical `http://` or `https://` URL, match `url-sha256:`, the `domain:` key (IDNA, as `match_key` does) and, when the host is an IP address, the `ip:` key, all against the verified list. SPEC.md §3.3 also requires a lookalike-name check (Caution `lookalike`). Apply the same rule `kings-taster-check` states, offline, with `python3 -E -s -m kt.lookalike`. Don't write a second algorithm. An unreadable or empty `config/popular/` is Unknown (`check_failed`).
 - If `~/.kings-taster/health.json` is failing, answer "Unknown, don't proceed (health check failing: <reason>)" and stop.
 - Never reuse Block or Unknown. Never cache a link.
 
