@@ -91,7 +91,7 @@ def package_parts(item):
 
 
 def package_ecosystem(item):
-    """"npm", "PyPI", or None for a package item."""
+    """Return "npm", "PyPI", or None for a package item."""
     return package_parts(item)[0]
 
 
